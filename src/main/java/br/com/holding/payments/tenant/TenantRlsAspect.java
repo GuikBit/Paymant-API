@@ -6,22 +6,25 @@ import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
+
+import java.lang.reflect.Method;
 
 /**
  * Aspect that sets the PostgreSQL session variable `app.current_company_id`
  * at the beginning of every @Transactional method, enabling Row-Level Security.
  *
- * Runs BEFORE the transaction opens (Order = Ordered.HIGHEST_PRECEDENCE + 1)
- * so that the SET LOCAL is scoped to the transaction.
+ * Runs INSIDE the transaction (Order = Ordered.LOWEST_PRECEDENCE - 1)
+ * so that SET LOCAL is scoped to the active transaction.
  */
 @Aspect
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@Order(Ordered.HIGHEST_PRECEDENCE + 1)
+@Order(1)
 public class TenantRlsAspect {
 
     private final EntityManager entityManager;
@@ -29,11 +32,15 @@ public class TenantRlsAspect {
     @Around("@annotation(org.springframework.transaction.annotation.Transactional) || " +
             "@within(org.springframework.transaction.annotation.Transactional)")
     public Object setTenantContext(ProceedingJoinPoint joinPoint) throws Throwable {
+        // Skip RLS for @CrossTenant methods
+        if (isCrossTenant(joinPoint)) {
+            return joinPoint.proceed();
+        }
+
         Long companyId = TenantContext.getCompanyId();
 
         if (companyId != null) {
-            entityManager.createNativeQuery("SET LOCAL app.current_company_id = :companyId")
-                    .setParameter("companyId", companyId.toString())
+            entityManager.createNativeQuery("SET LOCAL app.current_company_id = '" + companyId + "'")
                     .executeUpdate();
         } else {
             log.warn("No company_id in TenantContext for method {}#{}. RLS will filter all rows.",
@@ -42,5 +49,15 @@ public class TenantRlsAspect {
         }
 
         return joinPoint.proceed();
+    }
+
+    private boolean isCrossTenant(ProceedingJoinPoint joinPoint) {
+        try {
+            MethodSignature signature = (MethodSignature) joinPoint.getSignature();
+            Method method = signature.getMethod();
+            return method.isAnnotationPresent(CrossTenant.class);
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

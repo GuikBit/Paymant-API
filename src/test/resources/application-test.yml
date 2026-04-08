@@ -1,16 +1,18 @@
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/payment_db_test
+    url: jdbc:postgresql://${DB_HOST:localhost}:5432/payment_db
     username: payment_app
-    password: test_password
+    password: ${DB_PASSWORD:dev_password}
 
   data:
     redis:
-      host: localhost
+      host: ${REDIS_HOST:localhost}
       port: 6379
 
   jpa:
     show-sql: true
+    hibernate:
+      ddl-auto: validate
 
   flyway:
     clean-disabled: false
@@ -21,3 +23,13 @@ app:
     expiration-ms: 3600000
   asaas:
     base-url: http://localhost:8089
+  cors:
+    allowed-origins: "*"
+  outbox:
+    relay-interval-ms: 999999999
+    max-attempts: 5
+    webhook-url: ""
+
+jasypt:
+  encryptor:
+    password: ${JASYPT_ENCRYPTOR_PASSWORD:test-jasypt-secret}

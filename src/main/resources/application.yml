@@ -49,6 +49,35 @@ springdoc:
     path: /swagger-ui.html
     operations-sorter: method
 
+resilience4j:
+  retry:
+    instances:
+      asaas:
+        maxAttempts: 3
+        waitDuration: 1s
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+        retryExceptions:
+          - org.springframework.web.client.ResourceAccessException
+          - java.net.SocketTimeoutException
+          - java.net.ConnectException
+        ignoreExceptions:
+          - br.com.holding.payments.integration.asaas.client.AsaasApiException
+  circuitbreaker:
+    instances:
+      asaas:
+        registerHealthIndicator: true
+        slidingWindowSize: 10
+        minimumNumberOfCalls: 5
+        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        permittedNumberOfCallsInHalfOpenState: 3
+        slidingWindowType: COUNT_BASED
+  timelimiter:
+    instances:
+      asaas:
+        timeoutDuration: 15s
+
 jasypt:
   encryptor:
     algorithm: PBEWithHMACSHA512AndAES_256
@@ -69,3 +98,4 @@ app:
   outbox:
     relay-interval-ms: 5000
     max-attempts: 5
+    webhook-url: ${OUTBOX_WEBHOOK_URL:}

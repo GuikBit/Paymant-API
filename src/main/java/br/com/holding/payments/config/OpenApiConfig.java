@@ -15,9 +15,14 @@ public class OpenApiConfig {
     public OpenAPI customOpenAPI() {
         return new OpenAPI()
                 .info(new Info()
-                        .title("Payment API - Multi-Tenant Asaas Integration")
+                        .title("API de Pagamentos - Integracao Multi-Tenant com Asaas")
                         .version("1.0.0")
-                        .description("API de Pagamentos Multi-Tenant com Integração Asaas")
+                        .description("API de gestao de pagamentos multi-tenant com integracao ao gateway Asaas. " +
+                                "Suporta multiplas empresas (tenants) com isolamento de dados via Row-Level Security, " +
+                                "idempotencia em requisicoes, outbox pattern para eventos de dominio confiaveis, " +
+                                "e auditoria completa de operacoes. " +
+                                "Para autenticar, utilize o endpoint POST /api/v1/auth/login e envie o token JWT " +
+                                "retornado no header Authorization com o prefixo Bearer.")
                         .contact(new Contact()
                                 .name("Holding Payments Team")))
                 .addSecurityItem(new SecurityRequirement().addList("Bearer JWT"))

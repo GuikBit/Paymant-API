@@ -15,6 +15,12 @@ public class TenantContextInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        // Se o JwtAuthenticationFilter ja setou o company_id via JWT, nao sobrescreve
+        if (TenantContext.getCompanyId() != null) {
+            return true;
+        }
+
+        // Fallback: permite setar via header X-Company-Id (chamadas internas/system)
         String companyIdHeader = request.getHeader(COMPANY_HEADER);
         if (companyIdHeader != null) {
             try {
@@ -25,7 +31,6 @@ public class TenantContextInterceptor implements HandlerInterceptor {
                 return false;
             }
         }
-        // TODO: In Fase 1, also extract company_id from JWT claims
         return true;
     }
 

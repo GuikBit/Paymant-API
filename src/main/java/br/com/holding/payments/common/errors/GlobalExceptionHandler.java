@@ -1,5 +1,7 @@
 package br.com.holding.payments.common.errors;
 
+import br.com.holding.payments.idempotency.IdempotencyConflictException;
+import br.com.holding.payments.integration.asaas.client.AsaasApiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -36,6 +38,27 @@ public class GlobalExceptionHandler {
                 HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Invalid State Transition");
         problem.setType(URI.create("https://api.holding.com.br/errors/invalid-state-transition"));
+        return problem;
+    }
+
+    @ExceptionHandler(IdempotencyConflictException.class)
+    public ProblemDetail handleIdempotencyConflict(IdempotencyConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("Idempotency Conflict");
+        problem.setType(URI.create("https://api.holding.com.br/errors/idempotency-conflict"));
+        return problem;
+    }
+
+    @ExceptionHandler(AsaasApiException.class)
+    public ProblemDetail handleAsaasApiException(AsaasApiException ex) {
+        HttpStatus status = ex.isClientError() ? HttpStatus.UNPROCESSABLE_ENTITY : HttpStatus.BAD_GATEWAY;
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
+        problem.setTitle("Asaas Integration Error");
+        problem.setType(URI.create("https://api.holding.com.br/errors/asaas-integration"));
+        if (!ex.getErrors().isEmpty()) {
+            problem.setProperty("asaasErrors", ex.getErrors());
+        }
         return problem;
     }
 

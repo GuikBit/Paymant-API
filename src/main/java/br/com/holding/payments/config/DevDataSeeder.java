@@ -5,7 +5,6 @@ import br.com.holding.payments.auth.UserEntity;
 import br.com.holding.payments.auth.UserRepository;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.company.CompanyRepository;
-import jakarta.persistence.EntityManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -22,7 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class DevDataSeeder {
 
     private final PasswordEncoder passwordEncoder;
-    private final EntityManager entityManager;
 
     @Bean
     public CommandLineRunner seedDevData(CompanyRepository companyRepository,
@@ -32,28 +30,29 @@ public class DevDataSeeder {
 
     @Transactional
     public void seed(CompanyRepository companyRepository, UserRepository userRepository) {
-        if (companyRepository.count() > 0) {
+        if (userRepository.existsByEmail("admin@holding.dev")) {
             log.info("Dev data already exists, skipping seed.");
             return;
         }
 
         log.info("Seeding dev data...");
 
-        // Create holding company (companies table has no RLS)
-        Company holding = Company.builder()
-                .cnpj("00000000000100")
-                .razaoSocial("Holding Dev LTDA")
-                .nomeFantasia("Holding Dev")
-                .email("admin@holding.dev")
-                .build();
-        holding = companyRepository.save(holding);
+        // Create holding company if it doesn't exist (companies table has no RLS)
+        Company holding = companyRepository.findAll().stream()
+                .filter(c -> "00000000000100".equals(c.getCnpj()))
+                .findFirst()
+                .orElseGet(() -> {
+                    Company newCompany = Company.builder()
+                            .cnpj("00000000000100")
+                            .razaoSocial("Holding Dev LTDA")
+                            .nomeFantasia("Holding Dev")
+                            .email("admin@holding.dev")
+                            .build();
+                    return companyRepository.save(newCompany);
+                });
         companyRepository.flush();
 
-        // Set tenant context for RLS before inserting into users table
-        entityManager.createNativeQuery("SET LOCAL app.current_company_id = '" + holding.getId() + "'")
-                .executeUpdate();
-
-        // Create admin user
+        // Create admin user (users table has no RLS, no need for SET LOCAL)
         UserEntity admin = UserEntity.builder()
                 .company(holding)
                 .email("admin@holding.dev")

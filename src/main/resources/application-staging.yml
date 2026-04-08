@@ -21,5 +21,7 @@ logging:
     org.hibernate.SQL: WARN
 
 app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
   asaas:
     base-url: https://sandbox.asaas.com/api/v3
