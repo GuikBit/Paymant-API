@@ -1,0 +1,23 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/payment_db_test
+    username: payment_app
+    password: test_password
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+  jpa:
+    show-sql: true
+
+  flyway:
+    clean-disabled: false
+
+app:
+  jwt:
+    secret: test-secret-key-for-unit-tests-minimum-256-bits-long-enough
+    expiration-ms: 3600000
+  asaas:
+    base-url: http://localhost:8089

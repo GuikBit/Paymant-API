@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Program Files/Java//**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c/Users/Guilherme/.jdks//**)",
+      "Bash(export JAVA_HOME=\"$HOME/.jdks/corretto-21.0.6\")",
+      "Bash(export PATH=\"$JAVA_HOME/bin:$PATH\")",
+      "Bash(java -version)",
+      "Bash(export PATH=\"$JAVA_HOME/bin:$HOME/.m2/wrapper/dists/apache-maven-3.9.9-bin/4nf9hui3q3djbarqar9g711ggc/apache-maven-3.9.9/bin:$PATH\")",
+      "Bash(mvn compile:*)"
+    ]
+  }
+}

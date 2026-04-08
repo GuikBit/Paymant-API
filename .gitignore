@@ -1,0 +1,40 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE
+.idea/
+*.iws
+*.iml
+*.ipr
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env / Secrets
+.env
+*.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Build
+*.jar
+*.war
+*.class
+
+# Docker
+docker/data/
