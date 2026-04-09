@@ -1,5 +1,7 @@
 package br.com.holding.payments.customer;
 
+import br.com.holding.payments.creditledger.CustomerCreditLedger;
+import br.com.holding.payments.creditledger.CustomerCreditLedgerService;
 import br.com.holding.payments.customer.dto.*;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -7,10 +9,14 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+
+import java.math.BigDecimal;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/customers")
@@ -20,6 +26,7 @@ import org.springframework.web.bind.annotation.*;
 public class CustomerController {
 
     private final CustomerService customerService;
+    private final CustomerCreditLedgerService creditLedgerService;
 
     @PostMapping
     @Operation(summary = "Cadastrar novo cliente",
@@ -82,5 +89,16 @@ public class CustomerController {
                     "Atualiza nome, email e telefone com os dados retornados pela API do Asaas.")
     public ResponseEntity<CustomerResponse> sync(@PathVariable Long id) {
         return ResponseEntity.ok(customerService.syncFromAsaas(id));
+    }
+
+    @GetMapping("/{id}/credit-balance")
+    @Operation(summary = "Consultar saldo de credito e extrato",
+            description = "Retorna o saldo atual de credito do cliente e o historico de movimentacoes (append-only ledger).")
+    public ResponseEntity<Map<String, Object>> getCreditBalance(
+            @PathVariable Long id,
+            @PageableDefault(size = 20) Pageable pageable) {
+        BigDecimal balance = creditLedgerService.getBalance(id);
+        Page<CustomerCreditLedger> ledger = creditLedgerService.getLedger(id, pageable);
+        return ResponseEntity.ok(Map.of("balance", balance, "ledger", ledger));
     }
 }

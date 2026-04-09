@@ -11,7 +11,13 @@
       "Bash(mvn compile:*)",
       "Bash(xargs grep:*)",
       "Bash(docker exec:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(mkdir -p \"C:/Users/Guilherme/Desktop/MyRepo/GitHub/Paymant-API/src/main/java/br/com/holding/payments/webhook\")",
+      "Bash(mkdir -p \"C:/Users/Guilherme/Desktop/MyRepo/GitHub/Paymant-API/src/main/java/br/com/holding/payments/webhook/dto\")",
+      "Bash(./mvnw compile:*)",
+      "Bash(javac -version)",
+      "Bash(./mvnw --version)",
+      "Bash(where java:*)"
     ]
   }
 }

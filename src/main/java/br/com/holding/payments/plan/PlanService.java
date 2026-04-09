@@ -6,6 +6,8 @@ import br.com.holding.payments.common.errors.ResourceNotFoundException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.company.CompanyRepository;
 import br.com.holding.payments.plan.dto.*;
+import br.com.holding.payments.subscription.SubscriptionRepository;
+import br.com.holding.payments.subscription.SubscriptionStatus;
 import br.com.holding.payments.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -21,6 +23,7 @@ public class PlanService {
 
     private final PlanRepository planRepository;
     private final CompanyRepository companyRepository;
+    private final SubscriptionRepository subscriptionRepository;
     private final PlanMapper planMapper;
 
     @Transactional
@@ -97,7 +100,11 @@ public class PlanService {
     public void softDelete(Long id) {
         Plan plan = getPlanOrThrow(id);
 
-        // TODO: Fase 7 - verificar se existem assinaturas ativas antes de deletar
+        long activeCount = subscriptionRepository.countByPlanIdAndStatus(id, SubscriptionStatus.ACTIVE);
+        if (activeCount > 0) {
+            throw new BusinessException(
+                    "Nao e possivel excluir plano com " + activeCount + " assinatura(s) ativa(s). Cancele as assinaturas primeiro.");
+        }
 
         plan.softDelete();
         planRepository.save(plan);

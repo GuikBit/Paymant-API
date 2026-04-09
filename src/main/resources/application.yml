@@ -92,9 +92,15 @@ app:
     base-url: ${ASAAS_BASE_URL:https://sandbox.asaas.com/api/v3}
     connect-timeout-ms: 3000
     read-timeout-ms: 10000
+  subscription:
+    max-overdue-charges: 3
+    overdue-check-cron: "0 0 8 * * *"
+  plan-change:
+    scheduled-cron: "0 0 1 * * *"
   webhook:
     max-attempts: 10
     backoff-multiplier: 2
+    processor-interval-ms: 3000
   outbox:
     relay-interval-ms: 5000
     max-attempts: 5

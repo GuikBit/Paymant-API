@@ -1,0 +1,258 @@
+package br.com.holding.payments.subscription;
+
+import br.com.holding.payments.audit.Auditable;
+import br.com.holding.payments.charge.BillingType;
+import br.com.holding.payments.charge.ChargeRepository;
+import br.com.holding.payments.charge.dto.ChargeResponse;
+import br.com.holding.payments.charge.ChargeMapper;
+import br.com.holding.payments.common.errors.BusinessException;
+import br.com.holding.payments.common.errors.ResourceNotFoundException;
+import br.com.holding.payments.company.Company;
+import br.com.holding.payments.company.CompanyRepository;
+import br.com.holding.payments.customer.Customer;
+import br.com.holding.payments.customer.CustomerRepository;
+import br.com.holding.payments.integration.asaas.gateway.*;
+import br.com.holding.payments.outbox.OutboxPublisher;
+import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanRepository;
+import br.com.holding.payments.subscription.dto.*;
+import br.com.holding.payments.tenant.TenantContext;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class SubscriptionService {
+
+    private final SubscriptionRepository subscriptionRepository;
+    private final CustomerRepository customerRepository;
+    private final CompanyRepository companyRepository;
+    private final PlanRepository planRepository;
+    private final ChargeRepository chargeRepository;
+    private final SubscriptionMapper subscriptionMapper;
+    private final ChargeMapper chargeMapper;
+    private final AsaasGatewayService asaasGateway;
+    private final OutboxPublisher outboxPublisher;
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_CREATE", entity = "Subscription")
+    public SubscriptionResponse subscribe(CreateSubscriptionRequest request) {
+        Long companyId = TenantContext.getRequiredCompanyId();
+        Company company = companyRepository.getReferenceById(companyId);
+
+        Customer customer = customerRepository.findById(request.customerId())
+                .orElseThrow(() -> new ResourceNotFoundException("Customer", request.customerId()));
+
+        if (customer.getAsaasId() == null) {
+            throw new BusinessException("Cliente nao possui asaas_id. Sincronize com o Asaas primeiro.");
+        }
+
+        Plan plan = planRepository.findById(request.planId())
+                .orElseThrow(() -> new ResourceNotFoundException("Plan", request.planId()));
+
+        if (!plan.getActive()) {
+            throw new BusinessException("Plano inativo nao pode ser utilizado para novas assinaturas.");
+        }
+
+        // Build Asaas subscription data
+        AsaasPaymentData.CreditCardData creditCard = null;
+        AsaasPaymentData.CreditCardHolderData holderInfo = null;
+
+        if (request.creditCard() != null) {
+            creditCard = new AsaasPaymentData.CreditCardData(
+                    request.creditCard().holderName(),
+                    request.creditCard().number(),
+                    request.creditCard().expiryMonth(),
+                    request.creditCard().expiryYear(),
+                    request.creditCard().ccv()
+            );
+        }
+
+        if (request.creditCardHolderInfo() != null) {
+            holderInfo = new AsaasPaymentData.CreditCardHolderData(
+                    request.creditCardHolderInfo().name(),
+                    request.creditCardHolderInfo().email(),
+                    request.creditCardHolderInfo().cpfCnpj(),
+                    request.creditCardHolderInfo().postalCode(),
+                    request.creditCardHolderInfo().addressNumber(),
+                    request.creditCardHolderInfo().phone()
+            );
+        }
+
+        LocalDate nextDueDate = request.nextDueDate() != null ? request.nextDueDate() : LocalDate.now().plusDays(1);
+
+        AsaasSubscriptionData subscriptionData = new AsaasSubscriptionData(
+                customer.getAsaasId(),
+                request.billingType().name(),
+                plan.getValue(),
+                nextDueDate.toString(),
+                plan.getCycle().name(),
+                request.description() != null ? request.description() : plan.getName(),
+                request.externalReference(),
+                creditCard,
+                holderInfo,
+                request.creditCardToken(),
+                request.remoteIp()
+        );
+
+        AsaasSubscriptionResult asaasResult = asaasGateway.createSubscription(companyId, subscriptionData);
+
+        Subscription subscription = Subscription.builder()
+                .company(company)
+                .customer(customer)
+                .plan(plan)
+                .asaasId(asaasResult.asaasId())
+                .billingType(request.billingType())
+                .nextDueDate(nextDueDate)
+                .currentPeriodStart(nextDueDate.atStartOfDay())
+                .build();
+
+        subscription = subscriptionRepository.save(subscription);
+
+        outboxPublisher.publish("SubscriptionCreatedEvent", "Subscription",
+                subscription.getId().toString(), subscriptionMapper.toResponse(subscription));
+
+        log.info("Subscription created: id={}, asaasId={}, plan={}, customer={}",
+                subscription.getId(), subscription.getAsaasId(), plan.getName(), customer.getId());
+
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<SubscriptionResponse> findAll(SubscriptionStatus status, Long customerId, Pageable pageable) {
+        return subscriptionRepository.findWithFilters(status, customerId, pageable)
+                .map(subscriptionMapper::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public SubscriptionResponse findById(Long id) {
+        return subscriptionMapper.toResponse(getSubscriptionOrThrow(id));
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ChargeResponse> listCharges(Long subscriptionId, Pageable pageable) {
+        getSubscriptionOrThrow(subscriptionId); // validate existence
+        return chargeRepository.findBySubscriptionId(subscriptionId, pageable)
+                .map(chargeMapper::toResponse);
+    }
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_UPDATE", entity = "Subscription")
+    public SubscriptionResponse update(Long id, UpdateSubscriptionRequest request) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+
+        if (subscription.getStatus() == SubscriptionStatus.CANCELED) {
+            throw new BusinessException("Nao e possivel atualizar uma assinatura cancelada.");
+        }
+
+        if (request.billingType() != null) {
+            subscription.setBillingType(request.billingType());
+        }
+        if (request.nextDueDate() != null) {
+            subscription.setNextDueDate(request.nextDueDate());
+        }
+
+        subscription = subscriptionRepository.save(subscription);
+        log.info("Subscription updated: id={}", id);
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_CANCEL", entity = "Subscription")
+    public SubscriptionResponse cancel(Long id) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+        subscription.transitionTo(SubscriptionStatus.CANCELED);
+
+        Long companyId = TenantContext.getRequiredCompanyId();
+        if (subscription.getAsaasId() != null) {
+            asaasGateway.cancelSubscription(companyId, subscription.getAsaasId());
+        }
+
+        subscription = subscriptionRepository.save(subscription);
+
+        outboxPublisher.publish("SubscriptionCanceledEvent", "Subscription",
+                subscription.getId().toString(), subscriptionMapper.toResponse(subscription));
+
+        log.info("Subscription canceled: id={}, asaasId={}", id, subscription.getAsaasId());
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_PAUSE", entity = "Subscription")
+    public SubscriptionResponse pause(Long id) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+        subscription.transitionTo(SubscriptionStatus.PAUSED);
+
+        subscription = subscriptionRepository.save(subscription);
+
+        outboxPublisher.publish("SubscriptionPausedEvent", "Subscription",
+                subscription.getId().toString(), subscriptionMapper.toResponse(subscription));
+
+        log.info("Subscription paused: id={}", id);
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_RESUME", entity = "Subscription")
+    public SubscriptionResponse resume(Long id) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+        subscription.transitionTo(SubscriptionStatus.ACTIVE);
+
+        subscription = subscriptionRepository.save(subscription);
+
+        outboxPublisher.publish("SubscriptionResumedEvent", "Subscription",
+                subscription.getId().toString(), subscriptionMapper.toResponse(subscription));
+
+        log.info("Subscription resumed: id={}", id);
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional
+    @Auditable(action = "SUBSCRIPTION_UPDATE_PAYMENT_METHOD", entity = "Subscription")
+    public SubscriptionResponse updatePaymentMethod(Long id, UpdatePaymentMethodRequest request) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+
+        if (subscription.getStatus() == SubscriptionStatus.CANCELED) {
+            throw new BusinessException("Nao e possivel alterar metodo de pagamento de assinatura cancelada.");
+        }
+
+        subscription.setBillingType(request.billingType());
+        subscription = subscriptionRepository.save(subscription);
+
+        log.info("Subscription payment method updated: id={}, newBillingType={}", id, request.billingType());
+        return subscriptionMapper.toResponse(subscription);
+    }
+
+    @Transactional
+    public void suspend(Long id, String reason) {
+        Subscription subscription = getSubscriptionOrThrow(id);
+        subscription.transitionTo(SubscriptionStatus.SUSPENDED);
+
+        subscription = subscriptionRepository.save(subscription);
+
+        outboxPublisher.publish("SubscriptionSuspendedEvent", "Subscription",
+                subscription.getId().toString(), subscriptionMapper.toResponse(subscription));
+
+        log.info("Subscription suspended: id={}, reason={}", id, reason);
+    }
+
+    // ==================== PACKAGE-PRIVATE (used by webhook handler) ====================
+
+    public Subscription findByAsaasId(String asaasId) {
+        return subscriptionRepository.findByAsaasId(asaasId).orElse(null);
+    }
+
+    // ==================== PRIVATE ====================
+
+    private Subscription getSubscriptionOrThrow(Long id) {
+        return subscriptionRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Subscription", id));
+    }
+}

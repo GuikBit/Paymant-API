@@ -15,6 +15,7 @@ import br.com.holding.payments.integration.asaas.dto.AsaasBoletoResponse;
 import br.com.holding.payments.integration.asaas.gateway.*;
 import br.com.holding.payments.outbox.OutboxPublisher;
 import br.com.holding.payments.tenant.TenantContext;
+import br.com.holding.payments.webhook.WebhookService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -37,6 +38,7 @@ public class ChargeService {
     private final ChargeMapper chargeMapper;
     private final AsaasGatewayService asaasGateway;
     private final OutboxPublisher outboxPublisher;
+    private final WebhookService webhookService;
 
     @Transactional
     @Auditable(action = "CHARGE_CREATE_PIX", entity = "Charge")
@@ -207,6 +209,11 @@ public class ChargeService {
 
         outboxPublisher.publish("ChargeCreatedEvent", "Charge",
                 charge.getId().toString(), chargeMapper.toResponse(charge));
+
+        // Cross-reconciliation: accelerate deferred webhook events for this asaas_id
+        if (charge.getAsaasId() != null) {
+            webhookService.accelerateDeferredForAsaasId(charge.getAsaasId());
+        }
 
         log.info("Charge created: id={}, asaasId={}, type={}, value={}",
                 charge.getId(), charge.getAsaasId(), billingType, charge.getValue());

@@ -15,9 +15,9 @@ Referencia completa: `API Pagamento Assas.md`
 | 3 | Idempotencia e Outbox (fundacoes transversais) | 1 semana | CONCLUIDA |
 | 4 | Customers e Plans | 1-2 semanas | CONCLUIDA |
 | 5 | Charges e validacao de transicao de estado | 2 semanas | CONCLUIDA |
-| 6 | Webhook ingress + processamento tolerante a desordem | 2 semanas | NAO INICIADA |
-| 7 | Subscriptions e parcelamentos | 2 semanas | NAO INICIADA |
-| 8 | Mudanca de plano com pro-rata | 3 semanas | NAO INICIADA |
+| 6 | Webhook ingress + processamento tolerante a desordem | 2 semanas | CONCLUIDA |
+| 7 | Subscriptions e parcelamentos | 2 semanas | CONCLUIDA |
+| 8 | Mudanca de plano com pro-rata | 3 semanas | CONCLUIDA |
 | 9 | Reconciliacao, relatorios e dashboards | 1-2 semanas | NAO INICIADA |
 | 10 | Hardening, carga e producao | 2 semanas | NAO INICIADA |
 
@@ -207,8 +207,8 @@ Referencia completa: `API Pagamento Assas.md`
 | POST | /plans/{id}/new-version | Criar nova versao com preco alterado |
 
 ### Pendente para fases futuras
-- [ ] GET /customers/{id}/credit-balance (Fase 8 - CustomerCreditLedger)
-- [ ] Bloqueio de soft delete de plano com assinaturas ativas (Fase 7)
+- [x] GET /customers/{id}/credit-balance (implementado na Fase 8 - CustomerCreditLedger)
+- [x] Bloqueio de soft delete de plano com assinaturas ativas (implementado na Fase 7)
 
 ---
 
@@ -263,54 +263,288 @@ Referencia completa: `API Pagamento Assas.md`
 | CHARGEBACK | REFUNDED |
 | CANCELED | (nenhuma) |
 
-### Testes Pendentes (Fase 5)
-- [ ] Tabela exaustiva de transicoes validas/invalidas para ChargeStatus
-- [ ] Transicao invalida -> IllegalStateTransitionException + nada gravado
-- [ ] Todos os fluxos de criacao com WireMock simulando Asaas
-- [ ] Idempotencia ponta a ponta nos endpoints POST /charges/*
+### Testes (Fase 5) - 20+ testes
+
+#### ChargeStatusTransitionTest (unit)
+- [x] Tabela exaustiva de TODAS as transicoes validas via @ParameterizedTest
+- [x] Tabela exaustiva de TODAS as transicoes invalidas via @ParameterizedTest
+- [x] Nenhum status pode transitar para si mesmo
+- [x] Transicao valida atualiza o status da charge
+- [x] Transicao invalida -> IllegalStateTransitionException sem alterar status
+- [x] Fluxo completo PIX: PENDING -> CONFIRMED -> RECEIVED -> REFUNDED
+- [x] Fluxo boleto atrasado: PENDING -> OVERDUE -> RECEIVED
+- [x] Fluxo chargeback: CONFIRMED -> CHARGEBACK -> REFUNDED
+- [x] REFUNDED eh estado terminal
+- [x] CANCELED eh estado terminal
+
+#### ChargeServiceTest (unit/mockito)
+- [x] Criar cobranca PIX com sucesso (sync Asaas + outbox + reconciliacao cruzada)
+- [x] Cliente sem asaas_id lanca BusinessException
+- [x] Cliente inexistente lanca ResourceNotFoundException
+- [x] Cancelar cobranca PENDING com sucesso (sync Asaas + outbox)
+- [x] Cancelar cobranca REFUNDED lanca IllegalStateTransitionException
+- [x] Estornar cobranca CONFIRMED com sucesso
+- [x] Criar cobranca boleto com sucesso
+- [x] Criar cobranca cartao com sucesso
+- [x] Parcelamento com menos de 2 parcelas lanca BusinessException
 
 ---
 
-## Fase 6 - Webhook Ingress + Processamento (NAO INICIADA)
+## Fase 6 - Webhook Ingress + Processamento (CONCLUIDA)
 
-### Entregaveis Pendentes
-- [ ] Entity WebhookEvent
-- [ ] Endpoint POST /webhooks/asaas (validacao token, persist raw, 200 imediato)
-- [ ] Worker WebhookProcessor com SELECT ... FOR UPDATE SKIP LOCKED
-- [ ] Logica DEFERRED + backoff exponencial (5s, 30s, 2min, 10min, 1h)
-- [ ] DLQ apos N tentativas
-- [ ] Endpoint admin POST /webhooks/asaas/replay/{eventId}
-- [ ] Reconciliacao cruzada (DEFERRED -> pronto quando recurso criado)
-- [ ] Metricas: webhook_processing_duration_seconds, webhook_deferred_total, webhook_dlq_total
+### Entregaveis
+- [x] Entity WebhookEvent com mapeamento da tabela webhook_events (constraint unica asaas_event_id + company_id)
+- [x] WebhookEventStatus enum (PENDING, PROCESSING, DEFERRED, PROCESSED, FAILED, DLQ)
+- [x] AsaasEventType enum com mapeamento para ChargeStatus (17 tipos de evento suportados)
+- [x] Endpoint POST /webhooks/asaas (validacao token via header asaas-access-token, persist raw payload, 200 imediato)
+- [x] Idempotencia duravel: duplicatas capturadas pela constraint unica, respondidas com 200 OK
+- [x] Worker WebhookProcessor (@Scheduled) com SELECT ... FOR UPDATE SKIP LOCKED (batch de 50)
+- [x] Logica DEFERRED + backoff exponencial (5s, 30s, 2min, 10min, 1h)
+- [x] DLQ apos 10 tentativas (configuravel via app.webhook.max-attempts)
+- [x] WebhookEventHandler: roteamento de PAYMENT_* para transicoes de ChargeStatus + publicacao no outbox
+- [x] Eventos outbox mapeados: ChargePaidEvent, ChargeConfirmedEvent, ChargeOverdueEvent, ChargeCanceledEvent, ChargeRefundedEvent, ChargeChargebackEvent
+- [x] Eventos SUBSCRIPTION_* recebidos e persistidos (processamento completo na Fase 7)
+- [x] Endpoint admin GET /api/v1/admin/webhooks?status=... (listagem paginada)
+- [x] Endpoint admin GET /api/v1/admin/webhooks/summary (resumo com contagens por status)
+- [x] Endpoint admin POST /api/v1/admin/webhooks/{eventId}/replay (reprocessar eventos FAILED/DLQ)
+- [x] Reconciliacao cruzada: ao criar charge, eventos DEFERRED para o mesmo asaas_id sao acelerados (next_attempt_at = now)
+- [x] Metricas: webhook_processing_duration_seconds (Timer), webhook_deferred_total (Counter), webhook_dlq_total (Counter)
+- [x] Metricas Gauge: webhook_pending_count, webhook_deferred_count, webhook_dlq_count, webhook_lag_seconds
+
+### Pacotes Implementados
+- `webhook/` - WebhookEvent, WebhookEventRepository, WebhookEventStatus, AsaasEventType, WebhookService, WebhookEventHandler, WebhookProcessor, WebhookController, WebhookAdminController, WebhookMetrics
+- `webhook/dto/` - AsaasWebhookPayload, WebhookEventResponse, WebhookSummaryResponse
+
+### Endpoints Implementados (Fase 6)
+
+#### Webhook Publico (/api/v1/webhooks/asaas)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /webhooks/asaas?companyId={id} | Receber webhook do Asaas | Publico (token validado) |
+
+#### Admin - Webhooks (/api/v1/admin/webhooks)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /admin/webhooks?status=... | Listar eventos por status | HOLDING_ADMIN, SYSTEM |
+| GET | /admin/webhooks/summary | Resumo dos eventos webhook | HOLDING_ADMIN, SYSTEM |
+| POST | /admin/webhooks/{eventId}/replay | Reprocessar evento FAILED/DLQ | HOLDING_ADMIN, SYSTEM |
+
+### Fluxo de Processamento
+
+1. **Recepcao (sincrona)**: Asaas envia POST -> valida token -> persiste em webhook_events (PENDING) -> retorna 200 OK
+2. **Processamento (assincrono)**: Worker pega eventos PENDING/DEFERRED com FOR UPDATE SKIP LOCKED -> marca PROCESSING
+3. **Lookup**: Busca charge pelo asaas_id do payload. Se nao encontrar -> DEFERRED com backoff
+4. **Transicao**: Valida e executa transicao de estado da charge -> publica evento no outbox -> marca PROCESSED
+5. **Erro**: Transicao invalida -> FAILED. Erro generico -> retry com backoff. Max tentativas -> DLQ
+6. **Reconciliacao**: Charge criada -> busca eventos DEFERRED com mesmo asaas_id -> marca para retry imediato
+
+### Testes (Fase 6) - 25+ testes
+
+#### WebhookServiceTest (unit/mockito)
+- [x] Payload valido com token correto persiste evento
+- [x] Evento duplicado (constraint violation) retorna sem erro - 200 OK
+- [x] Token invalido lanca BusinessException
+- [x] Company sem webhook token aceita qualquer request
+- [x] Company inexistente lanca ResourceNotFoundException
+- [x] Replay de evento FAILED marca como PENDING
+- [x] Replay de evento DLQ marca como PENDING
+- [x] Replay de evento PROCESSED lanca BusinessException
+- [x] Replay de evento inexistente lanca ResourceNotFoundException
+- [x] Resumo retorna contagens corretas por status
+- [x] Acelera eventos DEFERRED com asaasId correspondente
+
+#### WebhookEventHandlerTest (unit/mockito)
+- [x] PAYMENT_RECEIVED com charge existente -> transiciona para RECEIVED + outbox
+- [x] PAYMENT_RECEIVED sem charge local -> retorna false (defer)
+- [x] Transicao invalida (CANCELED -> RECEIVED) lanca IllegalStateTransitionException
+- [x] PAYMENT_CONFIRMED transiciona para CONFIRMED
+- [x] PAYMENT_OVERDUE transiciona para OVERDUE
+- [x] PAYMENT_UPDATED (informacional) nao altera status
+- [x] Tipo de evento desconhecido eh marcado como processado
+- [x] SUBSCRIPTION_DELETED cancela assinatura ativa
+- [x] SUBSCRIPTION_DELETED ignora assinatura ja cancelada
+- [x] SUBSCRIPTION_UPDATED publica evento outbox sem alterar estado
+- [x] Evento de subscription sem assinatura local -> defer
+
+#### WebhookProcessorTest (unit/mockito)
+- [x] Evento processado com sucesso marca como PROCESSED
+- [x] Recurso nao encontrado -> DEFERRED com backoff
+- [x] DEFERRED apos max tentativas -> DLQ
+- [x] Transicao invalida -> FAILED (nao retenta automaticamente)
+- [x] Erro generico -> DEFERRED com retry
+- [x] Sem eventos pendentes nao faz nada
+- [x] Multiplos eventos processados em sequencia no mesmo batch
+- [x] Timer de metricas eh registrado para cada evento
 
 ---
 
-## Fase 7 - Subscriptions e Parcelamentos (NAO INICIADA)
+## Fase 7 - Subscriptions e Parcelamentos (CONCLUIDA)
 
-### Entregaveis Pendentes
-- [ ] Entity Subscription com @Version (optimistic lock)
-- [ ] SubscriptionService completo
-- [ ] Validacao de transicao de estado
-- [ ] Job handleOverdueSubscription (suspender apos N falhas)
-- [ ] Webhooks SUBSCRIPTION_*
-- [ ] Eventos outbox: SubscriptionCreatedEvent, SubscriptionCanceledEvent, SubscriptionSuspendedEvent
-- [ ] Parcelamentos cartao + boleto ponta a ponta
+### Entregaveis
+- [x] Entity Subscription com @Version (optimistic lock) mapeando tabela subscriptions
+- [x] SubscriptionStatus enum com mapa de transicoes validas (ACTIVE, PAUSED, SUSPENDED, CANCELED, EXPIRED)
+- [x] SubscriptionRepository com findWithFilters, findByAsaasId, findActiveByPlanId, findActiveWithOverdueCharges
+- [x] SubscriptionService completo: subscribe, cancel, pause, resume, updatePaymentMethod, suspend, findAll, findById, listCharges
+- [x] Validacao de transicao de estado via transitionTo() com IllegalStateTransitionException
+- [x] Integracao Asaas via AsaasGatewayService (createSubscription, cancelSubscription)
+- [x] SubscriptionController com 9 endpoints REST
+- [x] SubscriptionMapper para conversao entity -> DTO
+- [x] DTOs: CreateSubscriptionRequest, UpdateSubscriptionRequest, UpdatePaymentMethodRequest, SubscriptionResponse
+- [x] OverdueSubscriptionJob (@Scheduled, cron configuravel) - suspende assinaturas apos N cobrancas vencidas
+- [x] Webhooks SUBSCRIPTION_CREATED, SUBSCRIPTION_UPDATED, SUBSCRIPTION_DELETED processados no WebhookEventHandler
+- [x] AsaasWebhookPayload atualizado com SubscriptionData para deserializar eventos de subscription
+- [x] Eventos outbox: SubscriptionCreatedEvent, SubscriptionCanceledEvent, SubscriptionSuspendedEvent, SubscriptionPausedEvent, SubscriptionResumedEvent, SubscriptionUpdatedEvent
+- [x] Bloqueio de soft delete de plano com assinaturas ativas (PlanService atualizado)
+- [x] Parcelamentos cartao + boleto ja implementados ponta a ponta (Fase 5 - Installment entity + ChargeService)
+
+### Pacotes Implementados
+- `subscription/` - Subscription, SubscriptionRepository, SubscriptionStatus, SubscriptionService, SubscriptionController, SubscriptionMapper, OverdueSubscriptionJob
+- `subscription/dto/` - CreateSubscriptionRequest, UpdateSubscriptionRequest, UpdatePaymentMethodRequest, SubscriptionResponse
+
+### Endpoints Implementados (Fase 7)
+
+#### Assinaturas (/api/v1/subscriptions)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /subscriptions | Criar nova assinatura | Autenticado |
+| GET | /subscriptions | Listar com filtros (status, customerId) | Autenticado |
+| GET | /subscriptions/{id} | Buscar assinatura por ID | Autenticado |
+| GET | /subscriptions/{id}/charges | Listar cobrancas da assinatura | Autenticado |
+| PUT | /subscriptions/{id} | Atualizar assinatura | Autenticado |
+| PATCH | /subscriptions/{id}/payment-method | Alterar metodo de pagamento | Autenticado |
+| DELETE | /subscriptions/{id} | Cancelar assinatura | Autenticado |
+| POST | /subscriptions/{id}/pause | Pausar assinatura | Autenticado |
+| POST | /subscriptions/{id}/resume | Retomar assinatura | Autenticado |
+
+### Maquina de Estados (SubscriptionStatus)
+
+| De | Para (transicoes validas) |
+|----|--------------------------|
+| ACTIVE | PAUSED, SUSPENDED, CANCELED, EXPIRED |
+| PAUSED | ACTIVE, CANCELED |
+| SUSPENDED | ACTIVE, CANCELED |
+| CANCELED | (nenhuma) |
+| EXPIRED | (nenhuma) |
+
+### Configuracoes (application.yml)
+- `app.subscription.max-overdue-charges`: numero maximo de cobrancas vencidas antes de suspender (default: 3)
+- `app.subscription.overdue-check-cron`: cron para job de inadimplencia (default: 0 0 8 * * * - 8h diario)
+
+### Testes (Fase 7) - 25+ testes
+
+#### SubscriptionStatusTransitionTest (unit)
+- [x] Tabela exaustiva de TODAS as transicoes validas via @ParameterizedTest
+- [x] Tabela exaustiva de TODAS as transicoes invalidas via @ParameterizedTest
+- [x] Nenhum status pode transitar para si mesmo
+- [x] ACTIVE -> PAUSED funciona
+- [x] PAUSED -> ACTIVE funciona (resume)
+- [x] ACTIVE -> SUSPENDED funciona (inadimplencia)
+- [x] SUSPENDED -> ACTIVE funciona (regularizacao)
+- [x] CANCELED eh terminal
+- [x] EXPIRED eh terminal
+- [x] PAUSED -> SUSPENDED eh invalido
+- [x] Transicao invalida nao altera status
+
+#### SubscriptionServiceTest (unit/mockito)
+- [x] Criar assinatura com sucesso (sync Asaas + outbox)
+- [x] Cliente sem asaas_id lanca BusinessException
+- [x] Plano inativo lanca BusinessException
+- [x] Cancelar assinatura ACTIVE com sucesso (sync Asaas + outbox)
+- [x] Cancelar assinatura ja CANCELED lanca excecao
+- [x] Pausar assinatura ACTIVE com sucesso
+- [x] Retomar assinatura PAUSED com sucesso
+- [x] Pausar assinatura CANCELED lanca excecao
+- [x] Retomar assinatura ACTIVE lanca excecao
+- [x] Suspender assinatura ACTIVE por inadimplencia
+- [x] Alterar metodo de pagamento de assinatura ativa
+- [x] Alterar metodo de assinatura CANCELED lanca excecao
+- [x] findById inexistente lanca ResourceNotFoundException
+
+#### PlanSoftDeleteBlockTest (unit/mockito)
+- [x] Soft delete de plano COM assinaturas ativas eh bloqueado
+- [x] Soft delete de plano SEM assinaturas ativas funciona
+
+#### Testes pendentes para integracao (requerem Postgres/Redis)
+- [ ] Webhook SUBSCRIPTION_DELETED cancela assinatura local (integracao)
+- [ ] Optimistic lock (@Version) impede atualizacao concorrente (integracao)
+- [ ] OverdueSubscriptionJob suspende apos N cobrancas vencidas (integracao)
 
 ---
 
-## Fase 8 - Mudanca de Plano com Pro-Rata (NAO INICIADA)
+## Fase 8 - Mudanca de Plano com Pro-Rata (CONCLUIDA)
 
-### Entregaveis Pendentes
-- [ ] Entity SubscriptionPlanChange
-- [ ] Entity CustomerCreditLedger (append-only)
-- [ ] ProrationCalculator (puro, sem dependencias)
-- [ ] PlanLimitsValidator com SPI
-- [ ] CustomerCreditLedgerService com lock pessimista
-- [ ] PlanChangeService (previewChange, requestChange, confirmAfterPayment, cancelChange, processScheduledChanges)
-- [ ] Endpoints (preview-change, change-plan, plan-changes, cancel)
-- [ ] Job diario processScheduledChanges
-- [ ] Integracao webhook (pagamento Delta recebido -> confirmar)
-- [ ] Eventos outbox: PlanChangedEvent, PlanChangePendingPaymentEvent
+### Entregaveis
+- [x] Entity SubscriptionPlanChange com transitionTo() e maquina de estados (PENDING, AWAITING_PAYMENT, EFFECTIVE, SCHEDULED, FAILED, CANCELED)
+- [x] Entity CustomerCreditLedger (append-only, saldo cacheado em customers.credit_balance)
+- [x] PlanChangeStatus enum com mapa de transicoes validas
+- [x] PlanChangeType enum (UPGRADE, DOWNGRADE, SIDEGRADE)
+- [x] PlanChangePolicy enum (IMMEDIATE_PRORATA, END_OF_CYCLE, IMMEDIATE_NO_PRORATA)
+- [x] CreditLedgerType enum (CREDIT, DEBIT) e CreditLedgerOrigin enum (DOWNGRADE_PRORATA, MANUAL_ADJUSTMENT, REFUND, CHARGE_APPLIED)
+- [x] ProrationCalculator (puro, sem dependencias) com formula BigDecimal HALF_EVEN 2 casas
+- [x] PlanLimitsValidator com SPI - valida uso atual vs limites do plano destino (estrategias: BLOCK, SCHEDULE, GRACE_PERIOD)
+- [x] CustomerCreditLedgerService com lock pessimista (SELECT FOR UPDATE) na linha do customer
+- [x] CustomerRepository.findByIdWithLock() com @Lock(PESSIMISTIC_WRITE)
+- [x] PlanChangeService completo: previewChange, requestChange, confirmAfterPayment, cancelChange, processScheduledChanges
+- [x] PlanChangeController com 4 endpoints REST (preview-change, change-plan, plan-changes, cancel)
+- [x] PlanChangeMapper para conversao entity -> DTO
+- [x] ScheduledPlanChangeJob (@Scheduled cron diario) para processar mudancas END_OF_CYCLE
+- [x] Integracao webhook: PAYMENT_RECEIVED de cobranca Delta chama confirmAfterPayment automaticamente
+- [x] Eventos outbox: PlanChangedEvent, PlanChangePendingPaymentEvent, PlanChangeScheduledEvent
+- [x] Endpoint GET /customers/{id}/credit-balance (saldo + extrato do ledger)
+- [x] Upgrade: gera cobranca avulsa de Delta (cartao = imediato, PIX/boleto = AWAITING_PAYMENT)
+- [x] Downgrade: gera credito no ledger do cliente (nunca reembolso em dinheiro)
+- [x] Sidegrade: troca plano sem impacto financeiro
+
+### Pacotes Implementados
+- `planchange/` - SubscriptionPlanChange, SubscriptionPlanChangeRepository, PlanChangeStatus, PlanChangeType, PlanChangePolicy, PlanChangeService, PlanChangeController, PlanChangeMapper, ProrationCalculator, PlanLimitsValidator, ScheduledPlanChangeJob
+- `planchange/dto/` - RequestPlanChangeRequest, PlanChangePreviewResponse, PlanChangeResponse
+- `creditledger/` - CustomerCreditLedger, CustomerCreditLedgerRepository, CustomerCreditLedgerService, CreditLedgerType, CreditLedgerOrigin
+
+### Endpoints Implementados (Fase 8)
+
+#### Mudanca de Plano (/api/v1/subscriptions/{subscriptionId})
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /subscriptions/{id}/preview-change?newPlanId=... | Preview do pro-rata | Autenticado |
+| POST | /subscriptions/{id}/change-plan | Solicitar mudanca de plano | Autenticado |
+| GET | /subscriptions/{id}/plan-changes | Historico de mudancas | Autenticado |
+| DELETE | /subscriptions/{id}/plan-changes/{changeId} | Cancelar mudanca pendente | Autenticado |
+
+#### Saldo de Credito (/api/v1/customers/{id})
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /customers/{id}/credit-balance | Saldo + extrato do ledger | Autenticado |
+
+### Formula Pro-Rata
+```
+creditUnused = V_atual * (D_restantes / D_total)
+newCost      = V_novo  * (D_restantes / D_total)
+Delta        = newCost - creditUnused
+
+Delta > 0 -> UPGRADE (cobranca avulsa)
+Delta < 0 -> DOWNGRADE (credito no ledger)
+Delta = 0 -> SIDEGRADE (troca sem impacto)
+```
+
+### Maquina de Estados (PlanChangeStatus)
+
+| De | Para (transicoes validas) |
+|----|--------------------------|
+| PENDING | AWAITING_PAYMENT, EFFECTIVE, SCHEDULED, FAILED, CANCELED |
+| AWAITING_PAYMENT | EFFECTIVE, FAILED, CANCELED |
+| SCHEDULED | EFFECTIVE, FAILED, CANCELED |
+| EFFECTIVE | (nenhuma) |
+| FAILED | (nenhuma) |
+| CANCELED | (nenhuma) |
+
+### Testes Pendentes (Fase 8)
+- [ ] ProrationCalculator: property-based tests com jqwik
+- [ ] ProrationCalculator: 20+ cenarios unitarios (upgrade, downgrade, sidegrade, dia 1, ultimo dia, etc.)
+- [ ] PlanChangeService: preview, request, confirm, cancel
+- [ ] PlanLimitsValidator: BLOCK, SCHEDULE, GRACE_PERIOD
+- [ ] CustomerCreditLedgerService: addCredit, debitCredit, saldo insuficiente
+- [ ] Concorrencia: dois change-plan simultaneos -> apenas um vence
+- [ ] Webhook fora de ordem para cobrancas de Delta
 
 ---
 
@@ -426,9 +660,45 @@ Referencia completa: `API Pagamento Assas.md`
 | POST | /charges/{id}/refund | Estornar | Autenticado |
 | DELETE | /charges/{id} | Cancelar | Autenticado |
 
-### Endpoints Pendentes (Fases 6-9)
-- /api/v1/subscriptions (CRUD + pause/resume + change-plan)
-- /api/v1/webhooks/asaas (ingress + replay)
+### Webhooks (/api/v1/webhooks/asaas)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /webhooks/asaas?companyId={id} | Receber webhook do Asaas | Publico (token validado) |
+
+### Admin - Webhooks (/api/v1/admin/webhooks)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /admin/webhooks?status=... | Listar eventos por status | HOLDING_ADMIN, SYSTEM |
+| GET | /admin/webhooks/summary | Resumo dos eventos webhook | HOLDING_ADMIN, SYSTEM |
+| POST | /admin/webhooks/{eventId}/replay | Reprocessar evento FAILED/DLQ | HOLDING_ADMIN, SYSTEM |
+
+### Assinaturas (/api/v1/subscriptions)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /subscriptions | Criar nova assinatura | Autenticado |
+| GET | /subscriptions | Listar com filtros | Autenticado |
+| GET | /subscriptions/{id} | Buscar por ID | Autenticado |
+| GET | /subscriptions/{id}/charges | Listar cobrancas | Autenticado |
+| PUT | /subscriptions/{id} | Atualizar | Autenticado |
+| PATCH | /subscriptions/{id}/payment-method | Alterar metodo pagamento | Autenticado |
+| DELETE | /subscriptions/{id} | Cancelar | Autenticado |
+| POST | /subscriptions/{id}/pause | Pausar | Autenticado |
+| POST | /subscriptions/{id}/resume | Retomar | Autenticado |
+
+### Mudanca de Plano (/api/v1/subscriptions/{subscriptionId})
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /subscriptions/{id}/preview-change?newPlanId=... | Preview pro-rata | Autenticado |
+| POST | /subscriptions/{id}/change-plan | Solicitar mudanca | Autenticado |
+| GET | /subscriptions/{id}/plan-changes | Historico mudancas | Autenticado |
+| DELETE | /subscriptions/{id}/plan-changes/{changeId} | Cancelar mudanca | Autenticado |
+
+### Saldo de Credito (/api/v1/customers/{id})
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /customers/{id}/credit-balance | Saldo + extrato | Autenticado |
+
+### Endpoints Pendentes (Fase 9)
 - /api/v1/reconciliation (run + dlq replay)
 - /api/v1/reports (revenue, mrr, churn, overdue)
 
@@ -450,13 +720,21 @@ Referencia completa: `API Pagamento Assas.md`
 | asaas_api_errors_total{resource=subscription} | Counter | Erros na API Asaas (subscription) |
 | asaas_api_errors_total{resource=installment} | Counter | Erros na API Asaas (installment) |
 
-### Metricas Pendentes (Fases 5-9)
+### Metricas Webhook (Fase 6)
+
+| Metrica | Tipo | Descricao |
+|---------|------|-----------|
+| webhook_processing_duration_seconds | Timer | Tempo de processamento de um evento webhook |
+| webhook_deferred_total | Counter | Total de eventos adiados (recurso nao encontrado) |
+| webhook_dlq_total | Counter | Total de eventos movidos para DLQ |
+| webhook_pending_count | Gauge | Quantidade de eventos pendentes |
+| webhook_deferred_count | Gauge | Quantidade de eventos DEFERRED |
+| webhook_dlq_count | Gauge | Quantidade de eventos na DLQ |
+| webhook_lag_seconds | Gauge | Idade em segundos do evento pendente/deferred mais antigo |
+
+### Metricas Pendentes (Fase 9)
 - charges_created_total{method, company, origin}
 - charges_paid_total
-- webhook_processing_duration_seconds
-- webhook_deferred_total
-- webhook_dlq_total
-- asaas_api_errors_total
 - plan_changes_total
 - plan_change_proration_amount
 - customer_credit_balance_total
