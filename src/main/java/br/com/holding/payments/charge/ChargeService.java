@@ -160,6 +160,55 @@ public class ChargeService {
         return chargeMapper.toResponse(charge);
     }
 
+    @Transactional
+    @Auditable(action = "CHARGE_REGENERATE_BOLETO", entity = "Charge")
+    public ChargeResponse regenerateBoleto(Long id) {
+        Charge charge = getChargeOrThrow(id);
+        if (charge.getBillingType() != BillingType.BOLETO) {
+            throw new BusinessException("Regeneracao disponivel apenas para cobrancas do tipo BOLETO");
+        }
+        if (charge.getStatus() != ChargeStatus.PENDING && charge.getStatus() != ChargeStatus.OVERDUE) {
+            throw new BusinessException("Apenas cobrancas PENDING ou OVERDUE podem ter boleto regenerado. Status atual: " + charge.getStatus());
+        }
+
+        Long companyId = TenantContext.getRequiredCompanyId();
+        AsaasBoletoResponse boleto = asaasGateway.getBoletoIdentificationField(companyId, charge.getAsaasId());
+        charge.setBoletoUrl(boleto.identificationField());
+        charge = chargeRepository.save(charge);
+
+        log.info("Boleto regenerated: chargeId={}, asaasId={}", id, charge.getAsaasId());
+        return chargeMapper.toResponse(charge);
+    }
+
+    @Transactional
+    @Auditable(action = "CHARGE_RECEIVED_IN_CASH", entity = "Charge")
+    public ChargeResponse markAsReceivedInCash(Long id) {
+        Charge charge = getChargeOrThrow(id);
+        charge.transitionTo(ChargeStatus.RECEIVED);
+        charge = chargeRepository.save(charge);
+
+        outboxPublisher.publish("ChargePaidEvent", "Charge",
+                charge.getId().toString(), chargeMapper.toResponse(charge));
+
+        log.info("Charge marked as received in cash: id={}", id);
+        return chargeMapper.toResponse(charge);
+    }
+
+    @Transactional
+    @Auditable(action = "CHARGE_RESEND_NOTIFICATION", entity = "Charge")
+    public ChargeResponse resendNotification(Long id) {
+        Charge charge = getChargeOrThrow(id);
+        if (charge.getStatus() == ChargeStatus.CANCELED || charge.getStatus() == ChargeStatus.REFUNDED) {
+            throw new BusinessException("Nao e possivel reenviar notificacao para cobranca " + charge.getStatus());
+        }
+
+        outboxPublisher.publish("ChargeNotificationResendEvent", "Charge",
+                charge.getId().toString(), chargeMapper.toResponse(charge));
+
+        log.info("Charge notification resend requested: id={}, asaasId={}", id, charge.getAsaasId());
+        return chargeMapper.toResponse(charge);
+    }
+
     // ==================== PRIVATE ====================
 
     private ChargeResponse createCharge(CreateChargeRequest request, BillingType billingType) {

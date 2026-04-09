@@ -1,0 +1,93 @@
+groups:
+  - name: payment_api_alerts
+    rules:
+
+      # ==================== DLQ ====================
+
+      - alert: WebhookDlqNotEmpty
+        expr: webhook_dlq_count > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Webhook DLQ contem {{ $value }} eventos ha mais de 1 hora"
+          description: "Eventos na DLQ indicam falhas persistentes no processamento de webhooks. Verificar logs e considerar replay manual."
+          runbook: "POST /api/v1/admin/reconciliation/dlq/replay"
+
+      - alert: OutboxDlqNotEmpty
+        expr: outbox_dlq_count > 0
+        for: 1h
+        labels:
+          severity: warning
+        annotations:
+          summary: "Outbox DLQ contem {{ $value }} eventos ha mais de 1 hora"
+          description: "Eventos de dominio na DLQ nao estao sendo entregues ao destino. Verificar webhook-url e conectividade."
+
+      # ==================== LAG ====================
+
+      - alert: OutboxLagHigh
+        expr: outbox_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox lag acima de 5 minutos ({{ $value }}s)"
+          description: "O relay de eventos esta atrasado. Verificar se o OutboxRelay esta rodando e se o destino esta acessivel."
+
+      - alert: WebhookLagHigh
+        expr: webhook_lag_seconds > 300
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Webhook lag acima de 5 minutos ({{ $value }}s)"
+          description: "Eventos de webhook estao acumulando sem processamento. Verificar WebhookProcessor e capacidade de processamento."
+
+      # ==================== TAXA DE ERRO ====================
+
+      - alert: AsaasApiErrorRateHigh
+        expr: |
+          (
+            rate(asaas_api_errors_total[5m])
+            / on() group_left()
+            (rate(asaas_api_errors_total[5m]) + 0.001)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de erro da API Asaas acima de 5%"
+          description: "A integracao com o Asaas esta apresentando erros frequentes. Verificar status do Asaas e circuit breaker."
+
+      # ==================== CIRCUIT BREAKER ====================
+
+      - alert: AsaasCircuitBreakerOpen
+        expr: resilience4j_circuitbreaker_state{name="asaas"} == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker do Asaas esta ABERTO"
+          description: "O circuit breaker abriu devido a falhas consecutivas. Chamadas ao Asaas estao sendo bloqueadas. Verificar conectividade e status do Asaas."
+
+      # ==================== RECONCILIACAO ====================
+
+      - alert: ReconciliationDivergencesHigh
+        expr: increase(reconciliation_divergences_total[24h]) > 10
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} divergencias encontradas na reconciliacao nas ultimas 24h"
+          description: "Numero elevado de divergencias entre status local e Asaas. Verificar webhook delivery e processar manualmente se necessario."
+
+      # ==================== WEBHOOK PENDENTES ====================
+
+      - alert: WebhookPendingBacklog
+        expr: webhook_pending_count > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value }} webhooks pendentes ha mais de 10 minutos"
+          description: "Backlog de webhooks crescendo. Verificar capacidade de processamento do WebhookProcessor."

@@ -1,0 +1,240 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "payment-api-overview",
+    "title": "Payment API - Overview",
+    "tags": ["payment-api", "asaas"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Volume de Cobranças (por status)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "increase(http_server_requests_seconds_count{uri=~\"/api/v1/charges.*\", method=\"POST\"}[5m])",
+            "legendFormat": "Cobranças criadas"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Taxa de Aprovação",
+        "type": "gauge",
+        "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(increase(webhook_processing_duration_seconds_count{status=\"PROCESSED\"}[1h])) / (sum(increase(webhook_processing_duration_seconds_count[1h])) + 0.001) * 100",
+            "legendFormat": "% Aprovação"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "red" },
+                { "value": 80, "color": "yellow" },
+                { "value": 95, "color": "green" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Erros API Asaas",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+        "targets": [
+          {
+            "expr": "rate(asaas_api_errors_total[5m])",
+            "legendFormat": "{{ resource }}"
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "title": "Outbox Lag (segundos)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "expr": "outbox_lag_seconds",
+            "legendFormat": "Lag"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 60, "color": "yellow" },
+                { "value": 300, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Outbox Pendentes",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 8, "y": 8 },
+        "targets": [
+          {
+            "expr": "outbox_pending_count",
+            "legendFormat": "Pending"
+          }
+        ]
+      },
+      {
+        "id": 6,
+        "title": "Outbox DLQ",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "expr": "outbox_dlq_count",
+            "legendFormat": "DLQ"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 1, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Webhook DLQ",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 16, "y": 8 },
+        "targets": [
+          {
+            "expr": "webhook_dlq_count",
+            "legendFormat": "DLQ"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 1, "color": "red" }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Webhook Deferred",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 20, "y": 8 },
+        "targets": [
+          {
+            "expr": "webhook_deferred_count",
+            "legendFormat": "Deferred"
+          }
+        ]
+      },
+      {
+        "id": 9,
+        "title": "Webhook Lag (segundos)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+        "targets": [
+          {
+            "expr": "webhook_lag_seconds",
+            "legendFormat": "Lag"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Latência API Asaas (p95)",
+        "type": "timeseries",
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(http_client_requests_seconds_bucket{uri=~\".*asaas.*\"}[5m]))",
+            "legendFormat": "p95"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(http_client_requests_seconds_bucket{uri=~\".*asaas.*\"}[5m]))",
+            "legendFormat": "p50"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Circuit Breaker Asaas",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 16, "y": 12 },
+        "targets": [
+          {
+            "expr": "resilience4j_circuitbreaker_state{name=\"asaas\"}",
+            "legendFormat": "Estado"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              { "type": "value", "options": { "0": { "text": "CLOSED", "color": "green" } } },
+              { "type": "value", "options": { "1": { "text": "OPEN", "color": "red" } } },
+              { "type": "value", "options": { "2": { "text": "HALF_OPEN", "color": "yellow" } } }
+            ]
+          }
+        }
+      },
+      {
+        "id": 12,
+        "title": "Divergências Reconciliação (24h)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 4, "x": 20, "y": 12 },
+        "targets": [
+          {
+            "expr": "increase(reconciliation_divergences_total[24h])",
+            "legendFormat": "Divergências"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "steps": [
+                { "value": 0, "color": "green" },
+                { "value": 5, "color": "yellow" },
+                { "value": 10, "color": "red" }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

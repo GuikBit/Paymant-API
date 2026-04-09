@@ -29,6 +29,8 @@ app:
     relay-interval-ms: 999999999
     max-attempts: 5
     webhook-url: ""
+  rate-limit:
+    enabled: false
 
 jasypt:
   encryptor:

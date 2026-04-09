@@ -105,3 +105,10 @@ app:
     relay-interval-ms: 5000
     max-attempts: 5
     webhook-url: ${OUTBOX_WEBHOOK_URL:}
+  reconciliation:
+    cron: "0 0 3 * * *"
+    days-back: 3
+  rate-limit:
+    enabled: true
+    requests-per-window: 100
+    window-ms: 60000

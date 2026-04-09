@@ -18,8 +18,8 @@ Referencia completa: `API Pagamento Assas.md`
 | 6 | Webhook ingress + processamento tolerante a desordem | 2 semanas | CONCLUIDA |
 | 7 | Subscriptions e parcelamentos | 2 semanas | CONCLUIDA |
 | 8 | Mudanca de plano com pro-rata | 3 semanas | CONCLUIDA |
-| 9 | Reconciliacao, relatorios e dashboards | 1-2 semanas | NAO INICIADA |
-| 10 | Hardening, carga e producao | 2 semanas | NAO INICIADA |
+| 9 | Reconciliacao, relatorios e dashboards | 1-2 semanas | CONCLUIDA |
+| 10 | Hardening, carga e producao | 2 semanas | CONCLUIDA |
 
 ---
 
@@ -537,40 +537,173 @@ Delta = 0 -> SIDEGRADE (troca sem impacto)
 | FAILED | (nenhuma) |
 | CANCELED | (nenhuma) |
 
-### Testes Pendentes (Fase 8)
-- [ ] ProrationCalculator: property-based tests com jqwik
-- [ ] ProrationCalculator: 20+ cenarios unitarios (upgrade, downgrade, sidegrade, dia 1, ultimo dia, etc.)
-- [ ] PlanChangeService: preview, request, confirm, cancel
-- [ ] PlanLimitsValidator: BLOCK, SCHEDULE, GRACE_PERIOD
-- [ ] CustomerCreditLedgerService: addCredit, debitCredit, saldo insuficiente
-- [ ] Concorrencia: dois change-plan simultaneos -> apenas um vence
-- [ ] Webhook fora de ordem para cobrancas de Delta
+### Testes (Fase 8) - 149 testes, todos passando
+
+#### ProrationCalculatorTest (25 testes unitarios)
+- [x] Upgrade: meio do ciclo (dia 15), primeiro dia, ultimo dia, valores grandes, free para pago
+- [x] Downgrade: meio do ciclo, primeiro dia, ultimo dia, pago para free
+- [x] Sidegrade: mesmo valor, planos gratuitos
+- [x] Periodos variados: semanal (7 dias), anual (365 dias), 1 dia, fevereiro (28 dias), 31 dias
+- [x] Arredondamento: divisao periodica escala 2, centavos fracionarios HALF_EVEN
+- [x] Validacoes: nulls, periodEnd antes de start, start == end, changeDate fora do periodo
+- [x] Consistencia: credit/charge nunca ambos positivos, charge == delta quando positivo, credit == abs(delta) quando negativo
+- [x] Parametrizado: 8 combinacoes upgrade/downgrade/sidegrade com tipo correto
+
+#### ProrationCalculatorPropertyTest (9 propriedades jqwik, ~3100 tries)
+- [x] delta = charge - credit (sempre)
+- [x] credit e charge nunca ambos positivos
+- [x] credit e charge sempre >= 0
+- [x] newValue > currentValue -> UPGRADE
+- [x] newValue < currentValue -> DOWNGRADE
+- [x] mesmos valores -> SIDEGRADE com delta zero
+- [x] mudanca no ultimo dia -> delta sempre zero
+- [x] delta sempre escala <= 2
+- [x] simetria: swap(current, new) inverte sinal do delta
+
+#### PlanChangeStatusTransitionTest (17 testes)
+- [x] Transicoes validas parametrizadas (PENDING->AWAITING_PAYMENT, EFFECTIVE, SCHEDULED, FAILED, CANCELED; AWAITING_PAYMENT->EFFECTIVE, FAILED, CANCELED; SCHEDULED->EFFECTIVE, FAILED, CANCELED)
+- [x] Transicoes invalidas parametrizadas
+- [x] Self-transition invalida para todos os status
+- [x] Entity transitionTo(): PENDING->AWAITING_PAYMENT, PENDING->EFFECTIVE, PENDING->SCHEDULED, AWAITING_PAYMENT->EFFECTIVE, SCHEDULED->EFFECTIVE
+- [x] Terminais: EFFECTIVE, FAILED, CANCELED nao permitem nenhuma transicao
+- [x] markEffective() seta status e effectiveAt
+- [x] markFailed() seta status e failureReason
+- [x] markEffective/markFailed de terminal lanca excecao
+- [x] Transicao invalida nao altera o status
+
+#### PlanLimitsValidatorTest (14 testes)
+- [x] Sem violacoes: dentro do limite, exatamente no limite, sem limites, limites em branco, uso vazio, chave desconhecida
+- [x] BLOCK: single e multiplas violacoes
+- [x] SCHEDULE: violacao sugere agendamento, sem violacao retorna OK
+- [x] GRACE_PERIOD: permite com flag, sem violacao sem flag
+- [x] Edge cases: JSON invalido (falha silenciosa), zero usage, zero limit com uso positivo, mensagem de violacao com detalhes
+
+#### CustomerCreditLedgerServiceTest (10 testes)
+- [x] addCredit: incrementa saldo e salva entry, saldo inicial zero, customer inexistente
+- [x] debitCredit: saldo suficiente, saldo exato zera, saldo insuficiente lanca BusinessException, saldo zero, customer inexistente
+- [x] getBalance: retorna saldo, customer inexistente
+- [x] getLedger: retorna pagina de entradas
+
+#### PlanChangeServiceTest (20 testes)
+- [x] Preview: upgrade (delta positivo), downgrade (delta negativo), sidegrade (delta zero), END_OF_CYCLE (sem pro-rata), assinatura/plano inexistente, assinatura inativa, plano inativo, mesmo plano
+- [x] RequestChange: upgrade PIX (AWAITING_PAYMENT), upgrade cartao (imediato), downgrade com credito, sidegrade sem cobranca/credito, mudanca pendente bloqueia, END_OF_CYCLE agenda, BLOCK bloqueia, SCHEDULE forca agendamento
+- [x] ConfirmAfterPayment: confirma mudanca, ignora se nao encontra, ignora se nao AWAITING_PAYMENT
+- [x] Cancel: PENDING, AWAITING_PAYMENT, SCHEDULED, inexistente, outra assinatura
+- [x] ProcessScheduled: aplica prontas, nenhuma agendada, erro marca FAILED
 
 ---
 
-## Fase 9 - Reconciliacao, Relatorios e Dashboards (NAO INICIADA)
+## Fase 9 - Reconciliacao, Relatorios e Dashboards (CONCLUIDA)
 
-### Entregaveis Pendentes
-- [ ] Job de reconciliacao (charges, subscriptions)
-- [ ] Replay DLQ
-- [ ] Relatorios: revenue, MRR, churn, overdue (com filtro por origin)
-- [ ] Export CSV/Excel
-- [ ] Dashboards Grafana
-- [ ] Alertas Prometheus
+### Entregaveis
+- [x] ReconciliationService com reconcileChargesSince(companyId, date) e reconcileSubscriptions(companyId)
+- [x] ReconciliationService.replayDLQ() - reprocessa webhook_events e outbox em DLQ
+- [x] ReconciliationJob (@Scheduled cron diario 3h) - itera empresas ativas, reconcilia charges dos ultimos 3 dias + subscriptions + replay DLQ
+- [x] ReconciliationController (admin) - POST /reconciliation/charges, /subscriptions, /dlq/replay
+- [x] ReportService com revenue (groupBy method/day/origin), MRR/ARR, churn rate, overdue por cliente
+- [x] ReportRepository com queries nativas PostgreSQL para agregacoes
+- [x] ReportController - GET /reports/revenue, /subscriptions/mrr, /subscriptions/churn, /overdue
+- [x] ReportExportController - GET /reports/export/revenue, /mrr, /churn, /overdue (CSV download)
+- [x] Alertas Prometheus (monitoring/prometheus-alerts.yml): DLQ > 0 por 1h, outbox lag > 5min, taxa erro Asaas > 5%, circuit breaker aberto, divergencias reconciliacao, webhook backlog
+- [x] Dashboard Grafana base (monitoring/grafana-dashboard.json): volume cobrancas, taxa aprovacao, erros Asaas, lag outbox/webhook, DLQ counts, latencia Asaas p50/p95, circuit breaker, divergencias
+- [x] Metricas Prometheus adicionais: reconciliation_divergences_total, reconciliation_dlq_replay_total
+- [x] Configuracao app.reconciliation.cron no application.yml
+
+### Pacotes Implementados
+- `reconciliation/` - ReconciliationService, ReconciliationJob, ReconciliationController
+- `reconciliation/dto/` - ReconciliationResult (com Divergence), DlqReplayResult
+- `report/` - ReportService, ReportRepository, ReportController, ReportExportController
+- `report/dto/` - RevenueReportEntry, MrrReport, ChurnReport, OverdueReportEntry
+- `monitoring/` - prometheus-alerts.yml, grafana-dashboard.json
+
+### Endpoints Implementados (Fase 9)
+
+#### Reconciliacao (/api/v1/admin/reconciliation)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| POST | /admin/reconciliation/charges?daysBack=3 | Reconciliar cobrancas com Asaas | HOLDING_ADMIN |
+| POST | /admin/reconciliation/subscriptions | Reconciliar assinaturas com Asaas | HOLDING_ADMIN |
+| POST | /admin/reconciliation/dlq/replay | Reprocessar DLQ (webhook + outbox) | HOLDING_ADMIN |
+
+#### Relatorios (/api/v1/reports)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /reports/revenue?from=...&to=...&groupBy=method|day|origin | Faturamento agrupado | Autenticado |
+| GET | /reports/subscriptions/mrr | MRR e ARR atuais | Autenticado |
+| GET | /reports/subscriptions/churn?from=...&to=... | Taxa de churn no periodo | Autenticado |
+| GET | /reports/overdue | Inadimplencia por cliente | Autenticado |
+
+#### Exportacao CSV (/api/v1/reports/export)
+| Metodo | Endpoint | Descricao | Permissao |
+|--------|----------|-----------|-----------|
+| GET | /reports/export/revenue?from=...&to=...&groupBy=... | CSV de faturamento | Autenticado |
+| GET | /reports/export/mrr | CSV de MRR/ARR | Autenticado |
+| GET | /reports/export/churn?from=...&to=... | CSV de churn | Autenticado |
+| GET | /reports/export/overdue | CSV de inadimplencia | Autenticado |
+
+### Testes (Fase 9) - 38 testes, todos passando
+
+#### ReconciliationServiceTest (19 testes)
+- [x] reconcileChargesSince: sem charges (resultado vazio), charge sem asaasId (ignorada), status iguais (sem divergencia)
+- [x] reconcileChargesSince: divergencia com transicao valida (auto-fix), transicao invalida (manual review)
+- [x] reconcileChargesSince: erro ao buscar no Asaas (FETCH_FAILED), multiplas charges (processa todas)
+- [x] reconcileChargesSince: status Asaas desconhecido (sem divergencia), mapeamento RECEIVED_IN_CASH -> RECEIVED
+- [x] reconcileSubscriptions: sem subscriptions, sem asaasId, status iguais, ACTIVE->EXPIRED auto-fix, erro Asaas
+- [x] replayDLQ: webhook DLQ marca PENDING, outbox DLQ reseta status/attemptCount/lastError
+- [x] replayDLQ: ambos webhook e outbox, nenhum evento DLQ, resultado contem timestamp
+
+#### ReportServiceTest (14 testes)
+- [x] Revenue: por method (agrupa billing_type), por day (agrupa data), por origin, groupBy desconhecido (fallback origin), sem dados (lista vazia)
+- [x] MRR: calcula MRR e ARR (MRR*12), sem assinaturas retorna zero
+- [x] Churn: taxa calculada corretamente (5/100=5%), zero cancelamentos, divisao por zero (0 ativas), 100% churn, valor fracionario arredondado 2 casas
+- [x] Overdue: lista clientes inadimplentes com contagem e valor, sem inadimplencia retorna vazio
+
+#### ReportExportControllerTest (5 testes)
+- [x] Export revenue CSV: Content-Type text/csv, Content-Disposition com filename, header e dados corretos
+- [x] Export MRR CSV: headers e conteudo com assinaturas ativas, MRR e ARR
+- [x] Export churn CSV: headers e conteudo com periodo, cancelamentos e taxa
+- [x] Export overdue CSV: nomes entre aspas, valores corretos
+- [x] Export revenue sem dados: retorna apenas header CSV
 
 ---
 
-## Fase 10 - Hardening, Carga e Producao (NAO INICIADA)
+## Fase 10 - Hardening, Carga e Producao (CONCLUIDA)
 
-### Entregaveis Pendentes
-- [ ] Testes de carga (k6/Gatling)
-- [ ] Pen test
-- [ ] Revisao de logs para vazamento de PII
-- [ ] Documentacao OpenAPI completa
-- [ ] Runbooks operacionais
-- [ ] Plano de disaster recovery
-- [ ] Politica LGPD
-- [ ] Treinamento de equipes
+### Entregaveis
+- [x] Rate limiting por IP e company_id com sliding window (RateLimitFilter) - 100 req/min configuravel
+- [x] Headers X-RateLimit-Limit e X-RateLimit-Remaining nas respostas, 429 quando excedido
+- [x] PII masking nos logs (PiiMaskingConverter) - mascara CPF, CNPJ, cartao, email
+- [x] Logback atualizado com %maskedMsg para dev e MaskingJsonGeneratorDecorator para prod (JSON)
+- [x] Security headers: X-Content-Type-Options, X-Frame-Options (DENY), HSTS (1 ano + subdomains), CSP, Permissions-Policy
+- [x] Custom health checks: outbox lag, webhook DLQ, Redis connectivity
+- [x] Testes de carga k6: criacao de charges (ramping VUs 50+75), webhook flood (150 req/s), report queries
+- [x] Thresholds k6: p95 < 2s (charges), p95 < 500ms (webhooks), error rate < 5%
+- [x] 6 runbooks operacionais: Asaas fora do ar, DLQ crescendo, Outbox parado, Divergencia ledger, Mudanca plano travada, RLS bloqueando
+- [x] Documentacao OpenAPI completa revisada com descricao detalhada, servers (dev/staging/prod), rate limit, multi-tenancy
+- [x] Politica LGPD documentada: dados tratados, base legal, retencao, soft delete, direitos do titular
+- [x] Plano de disaster recovery: RPO 1h, RTO 4h, backup diario + PITR, procedimento de restore, validacao trimestral
+- [x] Configuracao app.rate-limit no application.yml, desabilitado em testes
+- [ ] Pen test (executar internamente ou contratar)
+- [ ] Treinamento das equipes consumidoras da API
+
+### Pacotes e Arquivos Implementados
+- `config/RateLimitFilter.java` - Rate limiting por IP/tenant com sliding window
+- `config/PiiMaskingConverter.java` - Logback converter para mascarar PII
+- `config/CustomHealthIndicators.java` - Health checks customizados (outbox lag, webhook DLQ, Redis)
+- `config/SecurityConfig.java` - Atualizado com security headers (HSTS, CSP, X-Frame-Options)
+- `config/OpenApiConfig.java` - Atualizado com documentacao completa e servers
+- `logback-spring.xml` - Atualizado com PII masking em dev e prod (JSON)
+- `load-tests/k6-charge-creation.js` - Teste de carga: criacao de charges com ramp-up
+- `load-tests/k6-webhook-flood.js` - Teste de carga: enxurrada de webhooks
+- `load-tests/k6-reports.js` - Teste de carga: consultas de relatorios
+- `docs/runbooks/01-asaas-fora-do-ar.md` - Runbook: Asaas indisponivel
+- `docs/runbooks/02-dlq-crescendo.md` - Runbook: DLQ de webhooks crescendo
+- `docs/runbooks/03-outbox-parado.md` - Runbook: Outbox com lag alto
+- `docs/runbooks/04-divergencia-ledger.md` - Runbook: Saldo de credito divergente
+- `docs/runbooks/05-mudanca-plano-travada.md` - Runbook: Plan change em AWAITING_PAYMENT
+- `docs/runbooks/06-rls-bloqueando-query.md` - Runbook: RLS bloqueando query legitima
+- `docs/LGPD.md` - Politica de tratamento de dados pessoais
+- `docs/DISASTER-RECOVERY.md` - Plano de disaster recovery com RPO/RTO
 
 ---
 

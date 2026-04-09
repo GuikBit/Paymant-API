@@ -133,4 +133,28 @@ public class ChargeController {
     public ResponseEntity<ChargeResponse> cancel(@PathVariable Long id) {
         return ResponseEntity.ok(chargeService.cancel(id));
     }
+
+    @PostMapping("/{id}/regenerate-boleto")
+    @Operation(summary = "Regenerar boleto",
+            description = "Regenera a linha digitavel e URL do boleto para cobrancas PENDING ou OVERDUE. " +
+                    "Util quando o boleto original expirou e o cliente precisa de um novo.")
+    public ResponseEntity<ChargeResponse> regenerateBoleto(@PathVariable Long id) {
+        return ResponseEntity.ok(chargeService.regenerateBoleto(id));
+    }
+
+    @PostMapping("/{id}/received-in-cash")
+    @Operation(summary = "Marcar como recebido em dinheiro",
+            description = "Marca a cobranca como paga em dinheiro (presencialmente). " +
+                    "Transiciona o status para RECEIVED e publica evento ChargePaidEvent.")
+    public ResponseEntity<ChargeResponse> markAsReceivedInCash(@PathVariable Long id) {
+        return ResponseEntity.ok(chargeService.markAsReceivedInCash(id));
+    }
+
+    @PostMapping("/{id}/resend-notification")
+    @Operation(summary = "Reenviar notificacao de cobranca",
+            description = "Publica evento ChargeNotificationResendEvent no outbox para " +
+                    "que o sistema externo (n8n) reenvie a notificacao ao cliente.")
+    public ResponseEntity<ChargeResponse> resendNotification(@PathVariable Long id) {
+        return ResponseEntity.ok(chargeService.resendNotification(id));
+    }
 }
