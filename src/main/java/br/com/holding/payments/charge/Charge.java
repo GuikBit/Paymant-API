@@ -51,6 +51,19 @@ public class Charge {
     @Column(nullable = false)
     private BigDecimal value;
 
+    // Coupon
+    @Column(name = "coupon_id")
+    private Long couponId;
+
+    @Column(name = "coupon_code", length = 50)
+    private String couponCode;
+
+    @Column(name = "discount_amount", precision = 12, scale = 2)
+    private BigDecimal discountAmount;
+
+    @Column(name = "original_value", precision = 12, scale = 2)
+    private BigDecimal originalValue;
+
     @Column(name = "due_date", nullable = false)
     private LocalDate dueDate;
 

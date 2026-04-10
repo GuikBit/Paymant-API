@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 /**
  * Fachada de dominio para operacoes no Asaas.
@@ -103,6 +104,12 @@ public class AsaasGatewayService {
         AsaasSubscriptionResponse response = subscriptionClient.cancel(companyId, asaasId);
         log.info("Subscription canceled in Asaas: asaasId={}, company={}", asaasId, companyId);
         return mapper.toSubscriptionResult(response);
+    }
+
+    public void updateSubscriptionValue(Long companyId, String asaasSubscriptionId, BigDecimal newValue) {
+        log.info("Updating Asaas subscription value: asaasId={}, companyId={}, newValue={}",
+                asaasSubscriptionId, companyId, newValue);
+        subscriptionClient.update(companyId, asaasSubscriptionId, Map.of("value", newValue));
     }
 
     // ==================== INSTALLMENTS ====================

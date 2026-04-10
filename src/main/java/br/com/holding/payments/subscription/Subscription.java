@@ -5,11 +5,13 @@ import br.com.holding.payments.common.errors.IllegalStateTransitionException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.customer.Customer;
 import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanCycle;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -44,6 +46,26 @@ public class Subscription {
     @Enumerated(EnumType.STRING)
     @Column(name = "billing_type", nullable = false, length = 20)
     private BillingType billingType;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private PlanCycle cycle;
+
+    @Column(name = "effective_price", nullable = false, precision = 12, scale = 2)
+    private BigDecimal effectivePrice;
+
+    // Coupon
+    @Column(name = "coupon_id")
+    private Long couponId;
+
+    @Column(name = "coupon_code", length = 50)
+    private String couponCode;
+
+    @Column(name = "coupon_discount_amount", precision = 12, scale = 2)
+    private BigDecimal couponDiscountAmount;
+
+    @Column(name = "coupon_uses_remaining")
+    private Integer couponUsesRemaining;
 
     @Column(name = "current_period_start")
     private LocalDateTime currentPeriodStart;

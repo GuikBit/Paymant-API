@@ -73,7 +73,7 @@ class ChargeServiceTest {
         return new CreateChargeRequest(
                 10L, BigDecimal.valueOf(100), LocalDate.now().plusDays(5),
                 "Test charge", null, null,
-                null, null, null, null, null, null
+                null, null, null, null, null, null, null
         );
     }
 
@@ -92,6 +92,7 @@ class ChargeServiceTest {
                 BillingType.PIX, BigDecimal.valueOf(100), LocalDate.now().plusDays(5),
                 ChargeStatus.PENDING, ChargeOrigin.API, null,
                 null, null, null, "https://invoice.url", null,
+                null, null, null,
                 LocalDateTime.now(), LocalDateTime.now()
         );
     }
@@ -242,7 +243,7 @@ class ChargeServiceTest {
         CreateChargeRequest req = new CreateChargeRequest(
                 10L, BigDecimal.valueOf(100), LocalDate.now().plusDays(5),
                 null, null, null, null, null, null, null,
-                1, null
+                1, null, null
         );
 
         assertThatThrownBy(() -> chargeService.createCreditCardInstallments(req))

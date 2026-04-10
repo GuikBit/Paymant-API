@@ -15,12 +15,15 @@ public class SubscriptionMapper {
                 subscription.getPlan().getName(),
                 subscription.getAsaasId(),
                 subscription.getBillingType(),
-                subscription.getPlan().getValue(),
-                subscription.getPlan().getCycle().name(),
+                subscription.getEffectivePrice(),
+                subscription.getCycle().name(),
                 subscription.getCurrentPeriodStart(),
                 subscription.getCurrentPeriodEnd(),
                 subscription.getNextDueDate(),
                 subscription.getStatus(),
+                subscription.getCouponCode(),
+                subscription.getCouponDiscountAmount(),
+                subscription.getCouponUsesRemaining(),
                 subscription.getCreatedAt(),
                 subscription.getUpdatedAt()
         );

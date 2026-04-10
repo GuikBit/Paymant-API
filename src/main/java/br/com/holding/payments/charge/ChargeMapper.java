@@ -25,6 +25,9 @@ public class ChargeMapper {
                 charge.getBoletoUrl(),
                 charge.getInvoiceUrl(),
                 charge.getInstallmentNumber(),
+                charge.getCouponCode(),
+                charge.getDiscountAmount(),
+                charge.getOriginalValue(),
                 charge.getCreatedAt(),
                 charge.getUpdatedAt()
         );

@@ -1,7 +1,5 @@
 package br.com.holding.payments.plan.dto;
 
-import br.com.holding.payments.plan.PlanCycle;
-
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
@@ -10,8 +8,21 @@ public record PlanResponse(
         Long companyId,
         String name,
         String description,
-        BigDecimal value,
-        PlanCycle cycle,
+        String codigo,
+        BigDecimal precoMensal,
+        BigDecimal precoAnual,
+        BigDecimal descontoPercentualAnual,
+        BigDecimal precoSemestral,
+        Boolean promoMensalAtiva,
+        BigDecimal promoMensalPreco,
+        String promoMensalTexto,
+        LocalDateTime promoMensalInicio,
+        LocalDateTime promoMensalFim,
+        Boolean promoAnualAtiva,
+        BigDecimal promoAnualPreco,
+        String promoAnualTexto,
+        LocalDateTime promoAnualInicio,
+        LocalDateTime promoAnualFim,
         Integer trialDays,
         BigDecimal setupFee,
         Boolean active,

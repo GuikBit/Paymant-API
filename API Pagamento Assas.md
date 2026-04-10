@@ -85,18 +85,26 @@ Gerencia as empresas da holding.
 
 ### 3.4. Módulo `plan` (Planos de assinatura)
 - CRUD de planos por empresa
-- Atributos: nome, descrição, valor, ciclo (`MONTHLY`, `QUARTERLY`, `SEMIANNUALLY`, `YEARLY`), trial, valor de setup, ativo/inativo, **`limits` (jsonb)**, **`features` (jsonb)**, **`tier_order` (int)**
-- Versionamento de planos (mudança de preço não afeta assinaturas existentes)
-- **Soft delete** (`deleted_at`): planos referenciados por assinaturas históricas nunca podem ser removidos fisicamente.
+- **Identificação dual**: `codigo` (slug imutável, único por empresa, ex: `premium-plus`) para referência programática + `name` (editável) para exibição
+- **Preço multi-ciclo**: `preco_mensal` (obrigatório) + `preco_anual` (opcional, validado com margem de 5% sobre o cálculo `mensal * 12 - desconto`). O preço semestral é calculado como `preco_mensal * 6`. O ciclo de cobrança (`MONTHLY`, `SEMIANNUALLY`, `YEARLY`) é escolhido pelo cliente na hora de assinar, não definido no plano.
+- **Desconto percentual anual** (`desconto_percentual_anual`): usado pelo frontend para calcular o preço anual e exibir "economize X%"
+- **Promoções temporais**: cada plano pode ter promoções independentes para mensal e anual, cada uma com: flag ativa, preço promocional, texto descritivo, data início e data fim. Promoções expiradas são validadas em tempo real pelo método `getEffectivePrice()`. Só afetam novas assinaturas.
+- **Features e limites** (`features jsonb`, `limits jsonb`): estrutura padronizada `[{"text": "...", "included": true/false}]` para exibição nos cards de pricing (included=true → check, included=false → riscado)
+- Atributos adicionais: trial_days, setup_fee, ativo/inativo, **`tier_order` (int)** para ordenação visual
+- Versionamento de planos por `codigo` (mudança de preço cria nova versão sem afetar assinaturas existentes)
+- **Soft delete** (`deleted_at`): planos referenciados por assinaturas históricas nunca podem ser removidos fisicamente. Bloqueado se houver assinaturas ativas.
+- Endpoint de pricing (`GET /plans/{id}/pricing`) retorna preços efetivos por ciclo já considerando promoções vigentes
+- Busca por código (`GET /plans/codigo/{codigo}`) para integração com frontend
 
 ### 3.5. Módulo `subscription` (Assinaturas)
 - Criar/cancelar/pausar/reativar assinaturas
-- Vincula `customer` + `plan`
+- Vincula `customer` + `plan` + **`cycle`** (ciclo escolhido pelo cliente: `MONTHLY`, `SEMIANNUALLY`, `YEARLY`)
+- **Preço efetivo congelado** (`effective_price`): calculado no momento da assinatura via `PlanService.getEffectivePrice(plan, cycle)`, considerando promoções vigentes. Não muda se o plano mudar de preço depois.
 - Espelha o objeto `subscription` do Asaas
 - Atualização de método de pagamento
 - Histórico de cobranças geradas pela assinatura
 - Tratamento de inadimplência (suspensão automática após N tentativas)
-- Mudança de plano (upgrade/downgrade) — ver seção 11.A.
+- Mudança de plano (upgrade/downgrade) e **mudança de ciclo** (ex: mensal → anual) — ver seção 11.A.
 
 ### 3.6. Módulo `charge` (Cobranças)
 Coração transacional do sistema.
@@ -233,14 +241,47 @@ customers (
 )
 
 plans (
-  id, company_id, name, value, cycle, trial_days, active, version,
-  limits jsonb, features jsonb, tier_order int,
-  deleted_at TIMESTAMP NULL,    -- soft delete
+  id, company_id,
+  codigo VARCHAR(50) NOT NULL,   -- slug imutável, único por empresa (idx parcial)
+  name VARCHAR(255) NOT NULL,    -- nome de exibição, editável
+
+  -- Preços
+  preco_mensal NUMERIC(12,2) NOT NULL,
+  preco_anual NUMERIC(12,2),
+  desconto_percentual_anual NUMERIC(5,2),
+
+  -- Promoção mensal
+  promo_mensal_ativa BOOLEAN DEFAULT false,
+  promo_mensal_preco NUMERIC(12,2),
+  promo_mensal_texto VARCHAR(100),
+  promo_mensal_inicio TIMESTAMP,
+  promo_mensal_fim TIMESTAMP,
+
+  -- Promoção anual
+  promo_anual_ativa BOOLEAN DEFAULT false,
+  promo_anual_preco NUMERIC(12,2),
+  promo_anual_texto VARCHAR(100),
+  promo_anual_inicio TIMESTAMP,
+  promo_anual_fim TIMESTAMP,
+
+  -- Configuração
+  trial_days INT DEFAULT 0,
+  setup_fee NUMERIC(12,2) DEFAULT 0.00,
+  active BOOLEAN DEFAULT true,
+  version INT DEFAULT 1,
+  limits jsonb,                  -- [{"text":"...", "included": true/false}]
+  features jsonb,                -- [{"text":"...", "included": true/false}]
+  tier_order INT DEFAULT 0,
+
+  deleted_at TIMESTAMP NULL,     -- soft delete
   created_at, updated_at
+  -- UNIQUE INDEX idx_plans_company_codigo (company_id, codigo) WHERE deleted_at IS NULL
 )
 
 subscriptions (
   id, company_id, customer_id, plan_id, asaas_id, billing_type,
+  cycle VARCHAR(20) NOT NULL,              -- MONTHLY, SEMIANNUALLY, YEARLY (escolhido pelo cliente)
+  effective_price NUMERIC(12,2) NOT NULL,  -- preço congelado no momento da assinatura
   current_period_start, current_period_end, next_due_date, status,
   version BIGINT,               -- optimistic lock
   created_at, updated_at
@@ -393,15 +434,18 @@ Prefixo: `/api/v1`. Header obrigatório nos endpoints transacionais: `X-Company-
 - `GET    /customers/{id}/credit-balance` — saldo + extrato
 
 ### 6.3. Planos
-- `POST   /plans`
-- `GET    /plans`
-- `GET    /plans/{id}`
-- `PUT    /plans/{id}`
+- `POST   /plans` — criar plano (campo `codigo` é slug imutável, `preco_mensal` obrigatório, `preco_anual` validado com margem de 5%)
+- `GET    /plans` — listar planos (paginado, ordenável por `tierOrder`)
+- `GET    /plans/{id}` — detalhar plano
+- `GET    /plans/codigo/{codigo}` — buscar plano ativo por código (slug)
+- `GET    /plans/{id}/pricing` — preços efetivos por ciclo (mensal, semestral, anual) com promoções aplicadas
+- `PUT    /plans/{id}` — atualizar plano (`codigo` não pode ser alterado)
+- `POST   /plans/{id}/new-version` — criar nova versão com preço alterado (versiona por `codigo`, desativa versão anterior)
 - `PATCH  /plans/{id}/activate` / `/deactivate`
 - `DELETE /plans/{id}` — **soft delete** (bloqueado se houver assinaturas ativas)
 
 ### 6.4. Assinaturas
-- `POST   /subscriptions`
+- `POST   /subscriptions` — criar assinatura (campo `cycle` obrigatório: `MONTHLY`, `SEMIANNUALLY`, `YEARLY`; preço efetivo calculado automaticamente pela API)
 - `GET    /subscriptions?customerId=...&status=...`
 - `GET    /subscriptions/{id}`
 - `GET    /subscriptions/{id}/charges`
@@ -778,28 +822,31 @@ br.com.holding.payments
 
 ### 11.A.1. Conceitos e premissas
 
-1. **Plano** tem: `valor`, `ciclo` (MONTHLY, QUARTERLY, etc.), `limites` (estruturados), `features` (lista de chaves), `versão`.
-2. **Assinatura** tem: `plano atual`, `data de início do ciclo atual`, `data do próximo vencimento`, `método de pagamento`, `status`.
-3. **Ciclo de cobrança** é o intervalo entre o último pagamento confirmado (`current_period_start`) e o próximo vencimento (`current_period_end`). Toda matemática pro-rata acontece dentro desse intervalo.
-4. **Upgrade** = mudar para plano de valor maior. Gera cobrança imediata da diferença ou apenas eleva o valor a partir do próximo ciclo (configurável).
-5. **Downgrade** = mudar para plano de valor menor. Em geral **não** gera reembolso em dinheiro — gera **crédito** que abate cobranças futuras, ou só passa a valer no próximo ciclo.
-6. **Sidegrade** = troca entre planos de mesmo valor. Aplica a regra de features/limites imediatamente, sem efeito financeiro.
-7. **Política por empresa** (configurável em `companies.plan_change_policy`):
+1. **Plano** tem: `preco_mensal`, `preco_anual` (opcional), `desconto_percentual_anual`, promoções (mensal e anual com datas), `limites` (JSONB estruturado), `features` (JSONB estruturado), `versão`, `codigo` (slug imutável).
+2. **Assinatura** tem: `plano atual`, **`cycle`** (ciclo escolhido pelo cliente: MONTHLY, SEMIANNUALLY, YEARLY), **`effective_price`** (preço congelado), `data de início do ciclo atual`, `data do próximo vencimento`, `método de pagamento`, `status`.
+3. **Preço efetivo** é calculado por `PlanService.getEffectivePrice(plan, cycle)` considerando promoções vigentes. O semestral = preço mensal efetivo × 6.
+4. **Ciclo de cobrança** é o intervalo entre o último pagamento confirmado (`current_period_start`) e o próximo vencimento (`current_period_end`). Toda matemática pro-rata acontece dentro desse intervalo.
+5. **Upgrade** = mudar para plano de preço diário maior. Gera cobrança imediata da diferença ou apenas eleva o valor a partir do próximo ciclo (configurável).
+6. **Downgrade** = mudar para plano de preço diário menor. Em geral **não** gera reembolso em dinheiro — gera **crédito** que abate cobranças futuras, ou só passa a valer no próximo ciclo.
+7. **Sidegrade** = troca entre planos de mesmo preço diário. Aplica a regra de features/limites imediatamente, sem efeito financeiro.
+8. **Mudança de ciclo** (`CYCLE_CHANGE`) = mesmo plano, ciclo diferente (ex: mensal → anual). O cliente recebe crédito proporcional do ciclo não usado e paga o novo ciclo inteiro. Tipo determinado comparando taxas diárias.
+9. **Política por empresa** (configurável em `companies.plan_change_policy`):
    - `IMMEDIATE_PRORATA` — aplica imediatamente e cobra/credita a diferença pro-rata
    - `END_OF_CYCLE` — agenda a troca para o próximo vencimento
    - `IMMEDIATE_NO_PRORATA` — aplica imediatamente sem ajuste financeiro
 
 ### 11.A.2. Fórmula pro-rata
 
+#### Mudança de plano no mesmo ciclo
+
 Sejam:
-- `V_atual` = valor do plano atual
-- `V_novo` = valor do plano novo
+- `V_atual` = `effective_price` da assinatura (preço congelado)
+- `V_novo` = `getEffectivePrice(newPlan, currentCycle)` (preço efetivo do novo plano para o mesmo ciclo)
 - `D_total` = dias totais do ciclo atual
 - `D_restantes` = dias restantes até `current_period_end`
 - `Credito_nao_usado` = `V_atual * (D_restantes / D_total)`
 - `Custo_novo_proporcional` = `V_novo * (D_restantes / D_total)`
 
-**Diferença:**
 ```
 Delta = Custo_novo_proporcional - Credito_nao_usado
 ```
@@ -809,6 +856,24 @@ Delta = Custo_novo_proporcional - Credito_nao_usado
 - `Delta == 0` → apenas troca features/limites
 
 A `current_period_end` **não muda**.
+
+#### Mudança de ciclo (cross-cycle, ex: mensal → anual)
+
+Quando o ciclo muda, a lógica é diferente — o novo ciclo é pago inteiro:
+
+- `Credito_nao_usado` = `V_atual * (D_restantes / D_total)` (proporcional do ciclo atual)
+- `Custo_novo` = `getEffectivePrice(newPlan, newCycle)` (preço integral do novo ciclo, **sem** proporcionalidade)
+
+```
+Delta = Custo_novo - Credito_nao_usado
+```
+
+**Exemplo:** Cliente paga R$100/mês, usou 15 de 30 dias. Muda para anual R$1.000/ano.
+- Crédito não usado: R$100 × (15/30) = R$50
+- Custo novo: R$1.000 (ciclo anual inteiro)
+- Delta: R$1.000 - R$50 = **R$950 (cobrança)**
+
+O tipo de mudança é determinado comparando taxas diárias: `V_atual / diasCicloAtual` vs `V_novo / diasCicloNovo` (MONTHLY=30, SEMIANNUALLY=180, YEARLY=365).
 
 > **Arredondamento:** sempre `BigDecimal` com `RoundingMode.HALF_EVEN` e 2 casas decimais. **Nunca `double`**.
 
@@ -864,7 +929,9 @@ Antes de aceitar um downgrade, validar uso atual contra limites do plano menor.
 subscription_plan_changes (
   id, company_id, subscription_id,
   previous_plan_id, requested_plan_id,
-  change_type ENUM(UPGRADE, DOWNGRADE, SIDEGRADE),
+  previous_cycle VARCHAR(20),    -- ciclo anterior (MONTHLY, SEMIANNUALLY, YEARLY)
+  requested_cycle VARCHAR(20),   -- ciclo solicitado
+  change_type ENUM(UPGRADE, DOWNGRADE, SIDEGRADE, CYCLE_CHANGE),
   policy ENUM(IMMEDIATE_PRORATA, END_OF_CYCLE, IMMEDIATE_NO_PRORATA),
   delta_amount NUMERIC(12,2),
   proration_credit NUMERIC(12,2),
@@ -878,6 +945,8 @@ subscription_plan_changes (
   failure_reason text
 )
 ```
+
+> **Nota:** `previous_cycle` e `requested_cycle` podem ser iguais (mudança só de plano) ou diferentes (mudança de ciclo). O tipo `CYCLE_CHANGE` é usado quando os planos têm a mesma taxa diária mas ciclos diferentes.
 
 ### 11.A.8 a 11.A.15 — endpoints, services, integração Asaas, fluxos passo-a-passo, casos de borda, testes e métricas
 

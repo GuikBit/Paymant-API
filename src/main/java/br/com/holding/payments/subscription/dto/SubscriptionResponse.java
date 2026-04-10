@@ -15,12 +15,15 @@ public record SubscriptionResponse(
         String planName,
         String asaasId,
         BillingType billingType,
-        BigDecimal value,
+        BigDecimal effectivePrice,
         String cycle,
         LocalDateTime currentPeriodStart,
         LocalDateTime currentPeriodEnd,
         LocalDate nextDueDate,
         SubscriptionStatus status,
+        String couponCode,
+        BigDecimal couponDiscountAmount,
+        Integer couponUsesRemaining,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

@@ -26,6 +26,9 @@ public record ChargeResponse(
         String boletoUrl,
         String invoiceUrl,
         Integer installmentNumber,
+        String couponCode,
+        BigDecimal discountAmount,
+        BigDecimal originalValue,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

@@ -5,6 +5,7 @@ import br.com.holding.payments.common.errors.IllegalStateTransitionException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.creditledger.CustomerCreditLedger;
 import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanCycle;
 import br.com.holding.payments.subscription.Subscription;
 import jakarta.persistence.*;
 import lombok.*;
@@ -40,6 +41,14 @@ public class SubscriptionPlanChange {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "requested_plan_id", nullable = false)
     private Plan requestedPlan;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "previous_cycle", length = 20)
+    private PlanCycle previousCycle;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "requested_cycle", length = 20)
+    private PlanCycle requestedCycle;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "change_type", nullable = false, length = 20)

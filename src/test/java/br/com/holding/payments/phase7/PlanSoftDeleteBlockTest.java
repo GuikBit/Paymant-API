@@ -40,7 +40,8 @@ class PlanSoftDeleteBlockTest {
 
         plan = Plan.builder()
                 .company(company).name("Plano Basic")
-                .value(BigDecimal.valueOf(49.90)).cycle(PlanCycle.MONTHLY)
+                .codigo("test-plan")
+                .precoMensal(BigDecimal.valueOf(49.90))
                 .active(true).build();
         plan.setId(1L);
 

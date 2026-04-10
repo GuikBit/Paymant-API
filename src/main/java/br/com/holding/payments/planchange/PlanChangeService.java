@@ -14,7 +14,9 @@ import br.com.holding.payments.creditledger.CustomerCreditLedger;
 import br.com.holding.payments.creditledger.CustomerCreditLedgerService;
 import br.com.holding.payments.outbox.OutboxPublisher;
 import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanCycle;
 import br.com.holding.payments.plan.PlanRepository;
+import br.com.holding.payments.plan.PlanService;
 import br.com.holding.payments.planchange.dto.PlanChangePreviewResponse;
 import br.com.holding.payments.planchange.dto.PlanChangeResponse;
 import br.com.holding.payments.planchange.dto.RequestPlanChangeRequest;
@@ -49,6 +51,7 @@ public class PlanChangeService {
     private final PlanLimitsValidator planLimitsValidator;
     private final OutboxPublisher outboxPublisher;
     private final PlanChangeMapper planChangeMapper;
+    private final PlanService planService;
 
     @Transactional(readOnly = true)
     public PlanChangePreviewResponse previewChange(Long subscriptionId, Long newPlanId) {
@@ -57,6 +60,10 @@ public class PlanChangeService {
         Plan newPlan = getPlanOrThrow(newPlanId);
 
         validateBasicPreConditions(subscription, newPlan);
+
+        PlanCycle currentCycle = subscription.getCycle();
+        BigDecimal currentEffectivePrice = subscription.getEffectivePrice();
+        BigDecimal newEffectivePrice = planService.getEffectivePrice(newPlan, currentCycle);
 
         Company company = subscription.getCompany();
         PlanChangePolicy policy = mapPolicy(company.getPlanChangePolicy());
@@ -72,19 +79,19 @@ public class PlanChangeService {
 
         ProrationCalculator.ProrationResult proration;
         if (policy == PlanChangePolicy.END_OF_CYCLE || policy == PlanChangePolicy.IMMEDIATE_NO_PRORATA) {
-            BigDecimal delta = newPlan.getValue().subtract(currentPlan.getValue());
+            BigDecimal delta = newEffectivePrice.subtract(currentEffectivePrice);
             PlanChangeType type = delta.signum() > 0 ? PlanChangeType.UPGRADE
                     : delta.signum() < 0 ? PlanChangeType.DOWNGRADE : PlanChangeType.SIDEGRADE;
             proration = new ProrationCalculator.ProrationResult(delta, BigDecimal.ZERO, BigDecimal.ZERO, type);
         } else {
             proration = ProrationCalculator.calculate(
-                    currentPlan.getValue(), newPlan.getValue(), periodStart, periodEnd, changeDate);
+                    currentEffectivePrice, newEffectivePrice, periodStart, periodEnd, changeDate);
         }
 
         return new PlanChangePreviewResponse(
                 subscriptionId,
-                currentPlan.getId(), currentPlan.getName(), currentPlan.getValue(),
-                newPlan.getId(), newPlan.getName(), newPlan.getValue(),
+                currentPlan.getId(), currentPlan.getName(), currentEffectivePrice,
+                newPlan.getId(), newPlan.getName(), newEffectivePrice,
                 proration.changeType(),
                 policy,
                 proration.delta(),
@@ -101,6 +108,10 @@ public class PlanChangeService {
         Plan newPlan = getPlanOrThrow(request.newPlanId());
 
         validateBasicPreConditions(subscription, newPlan);
+
+        PlanCycle currentCycle = subscription.getCycle();
+        BigDecimal currentEffectivePrice = subscription.getEffectivePrice();
+        BigDecimal newEffectivePrice = planService.getEffectivePrice(newPlan, currentCycle);
 
         // Check no pending change exists
         planChangeRepository.findPendingBySubscriptionId(subscriptionId)
@@ -123,13 +134,13 @@ public class PlanChangeService {
 
         ProrationCalculator.ProrationResult proration;
         if (policy == PlanChangePolicy.END_OF_CYCLE || policy == PlanChangePolicy.IMMEDIATE_NO_PRORATA) {
-            BigDecimal delta = newPlan.getValue().subtract(currentPlan.getValue());
+            BigDecimal delta = newEffectivePrice.subtract(currentEffectivePrice);
             PlanChangeType type = delta.signum() > 0 ? PlanChangeType.UPGRADE
                     : delta.signum() < 0 ? PlanChangeType.DOWNGRADE : PlanChangeType.SIDEGRADE;
             proration = new ProrationCalculator.ProrationResult(delta, BigDecimal.ZERO, BigDecimal.ZERO, type);
         } else {
             proration = ProrationCalculator.calculate(
-                    currentPlan.getValue(), newPlan.getValue(), periodStart, periodEnd, changeDate);
+                    currentEffectivePrice, newEffectivePrice, periodStart, periodEnd, changeDate);
         }
 
         // Validate downgrade limits
@@ -155,6 +166,8 @@ public class PlanChangeService {
                 .subscription(subscription)
                 .previousPlan(currentPlan)
                 .requestedPlan(newPlan)
+                .previousCycle(currentCycle)
+                .requestedCycle(currentCycle)
                 .changeType(proration.changeType())
                 .policy(policy)
                 .deltaAmount(proration.delta())
@@ -195,6 +208,7 @@ public class PlanChangeService {
         Plan newPlan = planChange.getRequestedPlan();
 
         subscription.setPlan(newPlan);
+        subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
         subscriptionRepository.save(subscription);
 
         planChange.markEffective();
@@ -245,6 +259,7 @@ public class PlanChangeService {
                 Plan newPlan = planChange.getRequestedPlan();
 
                 subscription.setPlan(newPlan);
+                subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
                 subscriptionRepository.save(subscription);
 
                 planChange.markEffective();
@@ -281,7 +296,7 @@ public class PlanChangeService {
                     "Cobranca pro-rata upgrade: " + currentPlan.getName() + " -> " + newPlan.getName(),
                     "plan_change_" + planChange.getId(),
                     ChargeOrigin.PLAN_CHANGE,
-                    null, null, null, null, null, null
+                    null, null, null, null, null, null, null
             ));
 
             Charge charge = new Charge();
@@ -291,6 +306,7 @@ public class PlanChangeService {
             if (subscription.getBillingType() == BillingType.CREDIT_CARD) {
                 // Credit card: assume immediate success, apply immediately
                 subscription.setPlan(newPlan);
+                subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
                 subscriptionRepository.save(subscription);
                 planChange.markEffective();
             } else {
@@ -312,11 +328,13 @@ public class PlanChangeService {
             planChange.setCreditLedgerEntry(ledgerEntry);
 
             subscription.setPlan(newPlan);
+            subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
             subscriptionRepository.save(subscription);
             planChange.markEffective();
         } else {
             // Sidegrade: just swap plans
             subscription.setPlan(newPlan);
+            subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
             subscriptionRepository.save(subscription);
             planChange.markEffective();
         }

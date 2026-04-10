@@ -21,7 +21,9 @@ public record CreateChargeRequest(
         String remoteIp,
         // Installment fields (optional)
         Integer installmentCount,
-        BigDecimal installmentValue
+        BigDecimal installmentValue,
+        // Coupon field (optional)
+        String couponCode
 ) {
     public record CreditCardInfo(
             String holderName,

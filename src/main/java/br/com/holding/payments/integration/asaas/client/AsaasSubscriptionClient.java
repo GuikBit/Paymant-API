@@ -3,6 +3,8 @@ package br.com.holding.payments.integration.asaas.client;
 import br.com.holding.payments.integration.asaas.dto.AsaasPageResponse;
 import br.com.holding.payments.integration.asaas.dto.AsaasSubscriptionRequest;
 import br.com.holding.payments.integration.asaas.dto.AsaasSubscriptionResponse;
+
+import java.util.Map;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import io.micrometer.core.instrument.Counter;
@@ -59,6 +61,17 @@ public class AsaasSubscriptionClient {
 
     @Retry(name = "asaas")
     @CircuitBreaker(name = "asaas", fallbackMethod = "handleError")
+    public AsaasSubscriptionResponse update(Long companyId, String asaasId, Map<String, Object> data) {
+        RestClient client = clientFactory.createForCompany(companyId);
+        return client.put()
+                .uri("/subscriptions/{id}", asaasId)
+                .body(data)
+                .retrieve()
+                .body(AsaasSubscriptionResponse.class);
+    }
+
+    @Retry(name = "asaas")
+    @CircuitBreaker(name = "asaas", fallbackMethod = "handleError")
     public AsaasPageResponse<AsaasSubscriptionResponse> list(Long companyId, int offset, int limit) {
         RestClient client = clientFactory.createForCompany(companyId);
         return client.get()
@@ -82,6 +95,10 @@ public class AsaasSubscriptionClient {
     }
 
     private <T> T handleError(Long companyId, AsaasSubscriptionRequest req, Throwable throwable) {
+        return handleError(companyId, throwable);
+    }
+
+    private <T> T handleError(Long companyId, String id, Map<String, Object> data, Throwable throwable) {
         return handleError(companyId, throwable);
     }
 

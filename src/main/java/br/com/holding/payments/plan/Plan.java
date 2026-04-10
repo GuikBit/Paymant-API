@@ -35,12 +35,53 @@ public class Plan {
 
     private String description;
 
-    @Column(nullable = false)
-    private BigDecimal value;
+    // Identification
+    @Column(nullable = false, length = 50)
+    private String codigo;
 
-    @Column(nullable = false, length = 20)
-    @Enumerated(EnumType.STRING)
-    private PlanCycle cycle;
+    // Pricing
+    @Column(name = "preco_mensal", nullable = false, precision = 12, scale = 2)
+    private BigDecimal precoMensal;
+
+    @Column(name = "preco_anual", precision = 12, scale = 2)
+    private BigDecimal precoAnual;
+
+    @Column(name = "desconto_percentual_anual", precision = 5, scale = 2)
+    private BigDecimal descontoPercentualAnual;
+
+    // Promo Mensal
+    @Builder.Default
+    @Column(name = "promo_mensal_ativa", nullable = false)
+    private Boolean promoMensalAtiva = false;
+
+    @Column(name = "promo_mensal_preco", precision = 12, scale = 2)
+    private BigDecimal promoMensalPreco;
+
+    @Column(name = "promo_mensal_texto", length = 100)
+    private String promoMensalTexto;
+
+    @Column(name = "promo_mensal_inicio")
+    private LocalDateTime promoMensalInicio;
+
+    @Column(name = "promo_mensal_fim")
+    private LocalDateTime promoMensalFim;
+
+    // Promo Anual
+    @Builder.Default
+    @Column(name = "promo_anual_ativa", nullable = false)
+    private Boolean promoAnualAtiva = false;
+
+    @Column(name = "promo_anual_preco", precision = 12, scale = 2)
+    private BigDecimal promoAnualPreco;
+
+    @Column(name = "promo_anual_texto", length = 100)
+    private String promoAnualTexto;
+
+    @Column(name = "promo_anual_inicio")
+    private LocalDateTime promoAnualInicio;
+
+    @Column(name = "promo_anual_fim")
+    private LocalDateTime promoAnualFim;
 
     @Builder.Default
     @Column(name = "trial_days", nullable = false)

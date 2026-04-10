@@ -19,6 +19,7 @@ import br.com.holding.payments.outbox.OutboxPublisher;
 import br.com.holding.payments.plan.Plan;
 import br.com.holding.payments.plan.PlanCycle;
 import br.com.holding.payments.plan.PlanRepository;
+import br.com.holding.payments.plan.PlanService;
 import br.com.holding.payments.planchange.*;
 import br.com.holding.payments.planchange.dto.PlanChangePreviewResponse;
 import br.com.holding.payments.planchange.dto.PlanChangeResponse;
@@ -63,6 +64,7 @@ class PlanChangeServiceTest {
     @Mock private PlanLimitsValidator planLimitsValidator;
     @Mock private OutboxPublisher outboxPublisher;
     @Mock private PlanChangeMapper planChangeMapper;
+    @Mock private PlanService planService;
 
     @InjectMocks
     private PlanChangeService service;
@@ -97,32 +99,32 @@ class PlanChangeServiceTest {
         currentPlan = Plan.builder()
                 .id(100L)
                 .name("Basic")
-                .value(new BigDecimal("100.00"))
-                .cycle(PlanCycle.MONTHLY)
+                .codigo("plan-basic")
+                .precoMensal(new BigDecimal("100.00"))
                 .active(true)
                 .build();
 
         upgradePlan = Plan.builder()
                 .id(200L)
                 .name("Pro")
-                .value(new BigDecimal("200.00"))
-                .cycle(PlanCycle.MONTHLY)
+                .codigo("plan-premium")
+                .precoMensal(new BigDecimal("200.00"))
                 .active(true)
                 .build();
 
         downgradePlan = Plan.builder()
                 .id(300L)
                 .name("Free")
-                .value(new BigDecimal("50.00"))
-                .cycle(PlanCycle.MONTHLY)
+                .codigo("plan-economy")
+                .precoMensal(new BigDecimal("50.00"))
                 .active(true)
                 .build();
 
         samePricePlan = Plan.builder()
                 .id(400L)
                 .name("Basic Alt")
-                .value(new BigDecimal("100.00"))
-                .cycle(PlanCycle.MONTHLY)
+                .codigo("plan-sidegrade")
+                .precoMensal(new BigDecimal("100.00"))
                 .active(true)
                 .build();
 
@@ -132,10 +134,22 @@ class PlanChangeServiceTest {
                 .customer(customer)
                 .plan(currentPlan)
                 .billingType(BillingType.PIX)
+                .cycle(PlanCycle.MONTHLY)
+                .effectivePrice(new BigDecimal("100.00"))
                 .status(SubscriptionStatus.ACTIVE)
                 .currentPeriodStart(LocalDateTime.of(2026, 4, 1, 0, 0))
                 .nextDueDate(LocalDate.of(2026, 5, 1))
                 .build();
+
+        // Stub planService.getEffectivePrice to return precoMensal for MONTHLY cycle
+        lenient().when(planService.getEffectivePrice(currentPlan, PlanCycle.MONTHLY))
+                .thenReturn(new BigDecimal("100.00"));
+        lenient().when(planService.getEffectivePrice(upgradePlan, PlanCycle.MONTHLY))
+                .thenReturn(new BigDecimal("200.00"));
+        lenient().when(planService.getEffectivePrice(downgradePlan, PlanCycle.MONTHLY))
+                .thenReturn(new BigDecimal("50.00"));
+        lenient().when(planService.getEffectivePrice(samePricePlan, PlanCycle.MONTHLY))
+                .thenReturn(new BigDecimal("100.00"));
     }
 
     @AfterEach
@@ -293,7 +307,9 @@ class PlanChangeServiceTest {
                     new ChargeResponse(50L, 1L, 10L, null, null, null,
                             BillingType.PIX, new BigDecimal("50.00"), LocalDate.now().plusDays(1),
                             ChargeStatus.PENDING, ChargeOrigin.PLAN_CHANGE, null,
-                            null, null, null, null, null, null, null));
+                            null, null, null, null, null,
+                            null, null, null,
+                            null, null));
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
             RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");
@@ -323,7 +339,9 @@ class PlanChangeServiceTest {
                     new ChargeResponse(50L, 1L, 10L, null, null, null,
                             BillingType.CREDIT_CARD, new BigDecimal("50.00"), LocalDate.now().plusDays(1),
                             ChargeStatus.CONFIRMED, ChargeOrigin.PLAN_CHANGE, null,
-                            null, null, null, null, null, null, null));
+                            null, null, null, null, null,
+                            null, null, null,
+                            null, null));
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
             RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");

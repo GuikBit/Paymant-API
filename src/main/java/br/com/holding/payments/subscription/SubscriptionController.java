@@ -69,14 +69,18 @@ public class SubscriptionController {
 
     @DeleteMapping("/{id}")
     @Operation(summary = "Cancelar assinatura")
-    public SubscriptionResponse cancel(@PathVariable Long id) {
-        return subscriptionService.cancel(id);
+    public SubscriptionResponse cancel(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean confirmCouponRemoval) {
+        return subscriptionService.cancel(id, confirmCouponRemoval);
     }
 
     @PostMapping("/{id}/pause")
     @Operation(summary = "Pausar assinatura")
-    public SubscriptionResponse pause(@PathVariable Long id) {
-        return subscriptionService.pause(id);
+    public SubscriptionResponse pause(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "false") boolean confirmCouponRemoval) {
+        return subscriptionService.pause(id, confirmCouponRemoval);
     }
 
     @PostMapping("/{id}/resume")

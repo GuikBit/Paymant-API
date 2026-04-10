@@ -6,6 +6,7 @@ import br.com.holding.payments.common.errors.BusinessException;
 import br.com.holding.payments.common.errors.ResourceNotFoundException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.company.CompanyRepository;
+import br.com.holding.payments.coupon.*;
 import br.com.holding.payments.customer.Customer;
 import br.com.holding.payments.customer.CustomerRepository;
 import br.com.holding.payments.installment.Installment;
@@ -39,6 +40,7 @@ public class ChargeService {
     private final AsaasGatewayService asaasGateway;
     private final OutboxPublisher outboxPublisher;
     private final WebhookService webhookService;
+    private final CouponService couponService;
 
     @Transactional
     @Auditable(action = "CHARGE_CREATE_PIX", entity = "Charge")
@@ -68,6 +70,9 @@ public class ChargeService {
     @Auditable(action = "CHARGE_CREATE_CC_INSTALLMENTS", entity = "Charge")
     public ChargeResponse createCreditCardInstallments(CreateChargeRequest request) {
         validateInstallmentRequest(request);
+        if (request.couponCode() != null && !request.couponCode().isBlank()) {
+            throw new BusinessException("Cupom de desconto nao pode ser aplicado a cobrancas parceladas.");
+        }
         return createCharge(request, BillingType.CREDIT_CARD);
     }
 
@@ -75,6 +80,9 @@ public class ChargeService {
     @Auditable(action = "CHARGE_CREATE_BOLETO_INSTALLMENTS", entity = "Charge")
     public ChargeResponse createBoletoInstallments(CreateChargeRequest request) {
         validateInstallmentRequest(request);
+        if (request.couponCode() != null && !request.couponCode().isBlank()) {
+            throw new BusinessException("Cupom de desconto nao pode ser aplicado a cobrancas parceladas.");
+        }
         return createCharge(request, BillingType.BOLETO);
     }
 
@@ -221,8 +229,27 @@ public class ChargeService {
             throw new BusinessException("Cliente nao possui asaas_id. Sincronize com o Asaas primeiro.");
         }
 
-        // Create payment on Asaas
-        AsaasPaymentData paymentData = buildPaymentData(request, customer, billingType);
+        // If coupon code provided, validate and calculate discount (usage recorded after charge is saved)
+        BigDecimal finalValue = request.value();
+        String appliedCouponCode = null;
+        Long appliedCouponId = null;
+        BigDecimal appliedDiscountAmount = null;
+        BigDecimal appliedOriginalValue = null;
+        CouponCalculator.CouponDiscountResult couponResult = null;
+
+        if (request.couponCode() != null && !request.couponCode().isBlank()) {
+            String upperCode = request.couponCode().toUpperCase();
+            Coupon coupon = couponService.findActiveEntityByCode(upperCode);
+            couponResult = couponService.validateAndCalculateForCharge(upperCode, customer.getId(), request.value());
+            finalValue = couponResult.finalValue();
+            appliedDiscountAmount = couponResult.discountAmount();
+            appliedOriginalValue = request.value();
+            appliedCouponCode = upperCode;
+            appliedCouponId = coupon.getId();
+        }
+
+        // Create payment on Asaas (use finalValue after coupon discount)
+        AsaasPaymentData paymentData = buildPaymentData(request, customer, billingType, finalValue);
         AsaasPaymentResult asaasResult = asaasGateway.createPayment(companyId, paymentData);
 
         // Handle installment if applicable
@@ -252,9 +279,20 @@ public class ChargeService {
                 .boletoUrl(asaasResult.bankSlipUrl())
                 .installment(installment)
                 .installmentNumber(asaasResult.installmentNumber())
+                .couponId(appliedCouponId)
+                .couponCode(appliedCouponCode)
+                .discountAmount(appliedDiscountAmount)
+                .originalValue(appliedOriginalValue)
                 .build();
 
         charge = chargeRepository.save(charge);
+
+        // Record coupon usage now that charge ID is available
+        if (appliedCouponCode != null && couponResult != null) {
+            couponService.recordChargeUsage(
+                    appliedCouponCode, customer.getId(), charge.getId(),
+                    appliedOriginalValue, couponResult);
+        }
 
         outboxPublisher.publish("ChargeCreatedEvent", "Charge",
                 charge.getId().toString(), chargeMapper.toResponse(charge));
@@ -270,7 +308,7 @@ public class ChargeService {
         return chargeMapper.toResponse(charge);
     }
 
-    private AsaasPaymentData buildPaymentData(CreateChargeRequest request, Customer customer, BillingType billingType) {
+    private AsaasPaymentData buildPaymentData(CreateChargeRequest request, Customer customer, BillingType billingType, BigDecimal finalValue) {
         AsaasPaymentData.CreditCardData creditCard = null;
         AsaasPaymentData.CreditCardHolderData holderInfo = null;
 
@@ -298,7 +336,7 @@ public class ChargeService {
         return new AsaasPaymentData(
                 customer.getAsaasId(),
                 billingType.name(),
-                request.value(),
+                finalValue,
                 request.dueDate().toString(),
                 request.description(),
                 request.externalReference(),

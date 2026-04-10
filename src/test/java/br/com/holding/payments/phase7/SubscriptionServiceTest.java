@@ -44,11 +44,13 @@ class SubscriptionServiceTest {
     @Mock private CustomerRepository customerRepository;
     @Mock private CompanyRepository companyRepository;
     @Mock private PlanRepository planRepository;
+    @Mock private br.com.holding.payments.plan.PlanService planService;
     @Mock private ChargeRepository chargeRepository;
     @Mock private SubscriptionMapper subscriptionMapper;
     @Mock private ChargeMapper chargeMapper;
     @Mock private AsaasGatewayService asaasGateway;
     @Mock private OutboxPublisher outboxPublisher;
+    @Mock private br.com.holding.payments.coupon.CouponService couponService;
 
     @InjectMocks
     private SubscriptionService subscriptionService;
@@ -69,7 +71,8 @@ class SubscriptionServiceTest {
 
         plan = Plan.builder()
                 .company(company).name("Plano Pro")
-                .value(BigDecimal.valueOf(99.90)).cycle(PlanCycle.MONTHLY)
+                .codigo("test-plan")
+                .precoMensal(BigDecimal.valueOf(99.90))
                 .active(true).build();
         plan.setId(20L);
 
@@ -86,6 +89,7 @@ class SubscriptionServiceTest {
                 1L, 1L, 10L, 20L, "Plano Pro", "sub_test123",
                 BillingType.PIX, BigDecimal.valueOf(99.90), "MONTHLY",
                 null, null, LocalDate.now().plusDays(1), status,
+                null, null, null,
                 LocalDateTime.now(), LocalDateTime.now()
         );
     }
@@ -111,8 +115,8 @@ class SubscriptionServiceTest {
             when(subscriptionMapper.toResponse(any())).thenReturn(dummyResponse(SubscriptionStatus.ACTIVE));
 
             CreateSubscriptionRequest request = new CreateSubscriptionRequest(
-                    10L, 20L, BillingType.PIX, null, null, null,
-                    null, null, null, null);
+                    10L, 20L, BillingType.PIX, PlanCycle.MONTHLY, null, null, null,
+                    null, null, null, null, null);
 
             SubscriptionResponse result = subscriptionService.subscribe(request);
 
@@ -131,8 +135,8 @@ class SubscriptionServiceTest {
             when(customerRepository.findById(10L)).thenReturn(Optional.of(noAsaas));
 
             CreateSubscriptionRequest request = new CreateSubscriptionRequest(
-                    10L, 20L, BillingType.PIX, null, null, null,
-                    null, null, null, null);
+                    10L, 20L, BillingType.PIX, PlanCycle.MONTHLY, null, null, null,
+                    null, null, null, null, null);
 
             assertThatThrownBy(() -> subscriptionService.subscribe(request))
                     .isInstanceOf(BusinessException.class)
@@ -148,8 +152,8 @@ class SubscriptionServiceTest {
             when(planRepository.findById(20L)).thenReturn(Optional.of(plan));
 
             CreateSubscriptionRequest request = new CreateSubscriptionRequest(
-                    10L, 20L, BillingType.PIX, null, null, null,
-                    null, null, null, null);
+                    10L, 20L, BillingType.PIX, PlanCycle.MONTHLY, null, null, null,
+                    null, null, null, null, null);
 
             assertThatThrownBy(() -> subscriptionService.subscribe(request))
                     .isInstanceOf(BusinessException.class)
@@ -167,6 +171,7 @@ class SubscriptionServiceTest {
             Subscription subscription = Subscription.builder()
                     .company(company).customer(customer).plan(plan)
                     .asaasId("sub_cancel").billingType(BillingType.PIX)
+                    .cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
                     .status(SubscriptionStatus.ACTIVE).build();
             subscription.setId(1L);
 
@@ -174,7 +179,7 @@ class SubscriptionServiceTest {
             when(subscriptionRepository.save(any())).thenReturn(subscription);
             when(subscriptionMapper.toResponse(any())).thenReturn(dummyResponse(SubscriptionStatus.CANCELED));
 
-            subscriptionService.cancel(1L);
+            subscriptionService.cancel(1L, false);
 
             assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
             verify(asaasGateway).cancelSubscription(1L, "sub_cancel");
@@ -185,12 +190,13 @@ class SubscriptionServiceTest {
         @DisplayName("Cancelar assinatura ja CANCELED lanca excecao")
         void cancel_alreadyCanceled_shouldThrow() {
             Subscription subscription = Subscription.builder()
-                    .company(company).status(SubscriptionStatus.CANCELED).build();
+                    .company(company).cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
+                    .status(SubscriptionStatus.CANCELED).build();
             subscription.setId(2L);
 
             when(subscriptionRepository.findById(2L)).thenReturn(Optional.of(subscription));
 
-            assertThatThrownBy(() -> subscriptionService.cancel(2L))
+            assertThatThrownBy(() -> subscriptionService.cancel(2L, false))
                     .isInstanceOf(IllegalStateTransitionException.class);
         }
     }
@@ -204,6 +210,7 @@ class SubscriptionServiceTest {
         void pause_active_shouldWork() {
             Subscription subscription = Subscription.builder()
                     .company(company).customer(customer).plan(plan)
+                    .cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
                     .status(SubscriptionStatus.ACTIVE).build();
             subscription.setId(1L);
 
@@ -211,7 +218,7 @@ class SubscriptionServiceTest {
             when(subscriptionRepository.save(any())).thenReturn(subscription);
             when(subscriptionMapper.toResponse(any())).thenReturn(dummyResponse(SubscriptionStatus.PAUSED));
 
-            subscriptionService.pause(1L);
+            subscriptionService.pause(1L, false);
 
             assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.PAUSED);
             verify(outboxPublisher).publish(eq("SubscriptionPausedEvent"), eq("Subscription"), eq("1"), any());
@@ -222,6 +229,7 @@ class SubscriptionServiceTest {
         void resume_paused_shouldWork() {
             Subscription subscription = Subscription.builder()
                     .company(company).customer(customer).plan(plan)
+                    .cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
                     .status(SubscriptionStatus.PAUSED).build();
             subscription.setId(1L);
 
@@ -239,12 +247,13 @@ class SubscriptionServiceTest {
         @DisplayName("Pausar assinatura CANCELED lanca excecao")
         void pause_canceled_shouldThrow() {
             Subscription subscription = Subscription.builder()
-                    .company(company).status(SubscriptionStatus.CANCELED).build();
+                    .company(company).cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
+                    .status(SubscriptionStatus.CANCELED).build();
             subscription.setId(3L);
 
             when(subscriptionRepository.findById(3L)).thenReturn(Optional.of(subscription));
 
-            assertThatThrownBy(() -> subscriptionService.pause(3L))
+            assertThatThrownBy(() -> subscriptionService.pause(3L, false))
                     .isInstanceOf(IllegalStateTransitionException.class);
         }
 
@@ -252,7 +261,8 @@ class SubscriptionServiceTest {
         @DisplayName("Retomar assinatura ACTIVE lanca excecao (ja ativa)")
         void resume_active_shouldThrow() {
             Subscription subscription = Subscription.builder()
-                    .company(company).status(SubscriptionStatus.ACTIVE).build();
+                    .company(company).cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
+                    .status(SubscriptionStatus.ACTIVE).build();
             subscription.setId(4L);
 
             when(subscriptionRepository.findById(4L)).thenReturn(Optional.of(subscription));
@@ -271,6 +281,7 @@ class SubscriptionServiceTest {
         void suspend_active_shouldWork() {
             Subscription subscription = Subscription.builder()
                     .company(company).customer(customer).plan(plan)
+                    .cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
                     .status(SubscriptionStatus.ACTIVE).build();
             subscription.setId(1L);
 
@@ -294,7 +305,8 @@ class SubscriptionServiceTest {
         void updatePaymentMethod_active_shouldWork() {
             Subscription subscription = Subscription.builder()
                     .company(company).customer(customer).plan(plan)
-                    .billingType(BillingType.PIX).status(SubscriptionStatus.ACTIVE).build();
+                    .billingType(BillingType.PIX).cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
+                    .status(SubscriptionStatus.ACTIVE).build();
             subscription.setId(1L);
 
             when(subscriptionRepository.findById(1L)).thenReturn(Optional.of(subscription));
@@ -313,7 +325,8 @@ class SubscriptionServiceTest {
         @DisplayName("Alterar metodo de assinatura CANCELED lanca excecao")
         void updatePaymentMethod_canceled_shouldThrow() {
             Subscription subscription = Subscription.builder()
-                    .company(company).status(SubscriptionStatus.CANCELED).build();
+                    .company(company).cycle(PlanCycle.MONTHLY).effectivePrice(BigDecimal.valueOf(99.90))
+                    .status(SubscriptionStatus.CANCELED).build();
             subscription.setId(2L);
 
             when(subscriptionRepository.findById(2L)).thenReturn(Optional.of(subscription));

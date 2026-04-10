@@ -52,9 +52,8 @@ public interface ReportRepository extends JpaRepository<Charge, Long> {
     // ==================== MRR ====================
 
     @Query(value = """
-            SELECT COALESCE(SUM(p.value), 0)
+            SELECT COALESCE(SUM(s.effective_price), 0)
             FROM subscriptions s
-            JOIN plans p ON s.plan_id = p.id
             WHERE s.status = 'ACTIVE'
             """, nativeQuery = true)
     BigDecimal calculateMrr();
