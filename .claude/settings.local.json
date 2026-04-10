@@ -19,7 +19,9 @@
       "Bash(./mvnw --version)",
       "Bash(where java:*)",
       "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw test -Dtest=\"br.com.holding.payments.phase8.*\" --batch-mode)",
-      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw test --batch-mode)"
+      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw test --batch-mode)",
+      "Bash(export JAVA_HOME=\"/c/Program Files/Java/corretto-21.0.6\")",
+      "Bash(export JAVA_HOME=\"/c/Users/Guilherme/.jdks/corretto-21.0.6\")"
     ]
   }
 }

@@ -83,6 +83,10 @@ public class AsaasGatewayService {
 
     // ==================== SUBSCRIPTIONS ====================
 
+    public AsaasPageResponse<AsaasPaymentResponse> listSubscriptionPayments(Long companyId, String subscriptionAsaasId) {
+        return paymentClient.listBySubscription(companyId, subscriptionAsaasId);
+    }
+
     public AsaasSubscriptionResult createSubscription(Long companyId, AsaasSubscriptionData data) {
         AsaasSubscriptionRequest request = mapper.toAsaasSubscriptionRequest(data);
         AsaasSubscriptionResponse response = subscriptionClient.create(companyId, request);
