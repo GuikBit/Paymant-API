@@ -9,6 +9,10 @@ import br.com.holding.payments.coupon.dto.*;
 import br.com.holding.payments.customer.Customer;
 import br.com.holding.payments.customer.CustomerRepository;
 import br.com.holding.payments.integration.asaas.gateway.AsaasGatewayService;
+import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanCycle;
+import br.com.holding.payments.plan.PlanRepository;
+import br.com.holding.payments.plan.PlanService;
 import br.com.holding.payments.subscription.Subscription;
 import br.com.holding.payments.subscription.SubscriptionRepository;
 import br.com.holding.payments.tenant.TenantContext;
@@ -32,6 +36,8 @@ public class CouponService {
     private final CompanyRepository companyRepository;
     private final CustomerRepository customerRepository;
     private final SubscriptionRepository subscriptionRepository;
+    private final PlanRepository planRepository;
+    private final PlanService planService;
     private final AsaasGatewayService asaasGateway;
     private final CouponMapper couponMapper;
 
@@ -90,7 +96,7 @@ public class CouponService {
                 .active(true)
                 .allowedPlans(request.allowedPlans())
                 .allowedCustomers(request.allowedCustomers())
-                .allowedCycle(request.allowedCycle())
+                .allowedCycle(blankToNull(request.allowedCycle()))
                 .build();
 
         coupon = couponRepository.save(coupon);
@@ -138,9 +144,9 @@ public class CouponService {
         if (request.validUntil() != null) coupon.setValidUntil(request.validUntil());
         if (request.maxUses() != null) coupon.setMaxUses(request.maxUses());
         if (request.maxUsesPerCustomer() != null) coupon.setMaxUsesPerCustomer(request.maxUsesPerCustomer());
-        if (request.allowedPlans() != null) coupon.setAllowedPlans(request.allowedPlans());
-        if (request.allowedCustomers() != null) coupon.setAllowedCustomers(request.allowedCustomers());
-        if (request.allowedCycle() != null) coupon.setAllowedCycle(request.allowedCycle());
+        coupon.setAllowedPlans(blankToNull(request.allowedPlans()));
+        coupon.setAllowedCustomers(blankToNull(request.allowedCustomers()));
+        coupon.setAllowedCycle(blankToNull(request.allowedCycle()));
 
         // Re-validate discount rules after applying changes
         if (coupon.getDiscountType() == DiscountType.PERCENTAGE
@@ -217,14 +223,16 @@ public class CouponService {
         }
 
         // Check 8: Cycle matches
-        if (coupon.getScope() == CouponScope.SUBSCRIPTION && coupon.getAllowedCycle() != null
-                && request.cycle() != null && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
+        if (coupon.getScope() == CouponScope.SUBSCRIPTION
+                && blankToNull(coupon.getAllowedCycle()) != null
+                && request.cycle() != null
+                && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
             return CouponValidationResponse.invalid("Cupom nao e valido para o ciclo de cobranca selecionado.");
         }
 
-        // If value provided, calculate discount preview
-        if (request.value() != null) {
-            return buildSuccessResponse(coupon, request.value());
+        BigDecimal effectiveValue = resolveValue(request, coupon.getCompany().getId());
+        if (effectiveValue != null) {
+            return buildSuccessResponse(coupon, effectiveValue);
         }
 
         return new CouponValidationResponse(
@@ -286,14 +294,16 @@ public class CouponService {
         }
 
         // Check 8: Cycle matches
-        if (coupon.getScope() == CouponScope.SUBSCRIPTION && coupon.getAllowedCycle() != null
-                && request.cycle() != null && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
+        if (coupon.getScope() == CouponScope.SUBSCRIPTION
+                && blankToNull(coupon.getAllowedCycle()) != null
+                && request.cycle() != null
+                && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
             return CouponValidationResponse.invalid("Cupom nao e valido para o ciclo de cobranca selecionado.");
         }
 
-        // If value provided, calculate discount preview
-        if (request.value() != null) {
-            return buildSuccessResponse(coupon, request.value());
+        BigDecimal effectiveValue = resolveValue(request, coupon.getCompany().getId());
+        if (effectiveValue != null) {
+            return buildSuccessResponse(coupon, effectiveValue);
         }
 
         return new CouponValidationResponse(
@@ -525,5 +535,33 @@ public class CouponService {
     private boolean isCustomerAllowed(String allowedCustomersJson, Long customerId) {
         return allowedCustomersJson.contains("\"" + customerId + "\"")
                 || allowedCustomersJson.contains(String.valueOf(customerId));
+    }
+
+    private static String blankToNull(String value) {
+        return (value == null || value.trim().isEmpty()) ? null : value;
+    }
+
+    private BigDecimal resolveValue(ValidateCouponRequest request, Long companyId) {
+        if (request.value() != null) {
+            return request.value();
+        }
+        if (request.scope() != CouponScope.SUBSCRIPTION
+                || blankToNull(request.planCode()) == null
+                || blankToNull(request.cycle()) == null) {
+            return null;
+        }
+        Plan plan = planRepository
+                .findByCodigoAndCompanyIdAndActiveTrue(request.planCode(), companyId)
+                .orElse(null);
+        if (plan == null) {
+            return null;
+        }
+        PlanCycle cycle;
+        try {
+            cycle = PlanCycle.valueOf(request.cycle().trim().toUpperCase());
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+        return planService.getEffectivePrice(plan, cycle);
     }
 }

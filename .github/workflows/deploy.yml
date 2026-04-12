@@ -1,0 +1,80 @@
+name: CI/CD Payment API - Spring Boot
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build_and_deploy:
+    name: Build & Deploy Payment API
+    runs-on: self-hosted
+    #environment: production
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+
+      # 1. CARREGA A CHAVE SSH NO AGENTE (PRÁTICA SEGURA!)
+      - name: Configurar SSH Agent
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Adicionar servidor aos Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Build no Servidor Remoto
+        run: |
+          REPO_URL="git@github.com:GuikBit/Paymant-API.git"
+          TARGET_DIR="/var/runner/pay"
+
+          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
+            set -e
+
+            if [ -d "$TARGET_DIR/.git" ]; then
+              echo "--- Repositório existe. Atualizando..."
+              cd "$TARGET_DIR"
+              git checkout main
+              git reset --hard
+              git clean -fd
+              git pull origin main
+            else
+              echo "--- Clonando repositório..."
+              mkdir -p "$(dirname "$TARGET_DIR")"
+              git clone -b main "$REPO_URL" "$TARGET_DIR"
+              cd "$TARGET_DIR"
+            fi
+
+            echo "--- Iniciando build Maven..."
+            chmod +x ./mvnw
+            ./mvnw clean package -DskipTests
+          EOF
+
+      - name: Deploy e Reinício do Serviço
+        run: |
+          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
+            set -e
+            echo "--- Preparando a pasta de produção..."
+
+            # Garante que a pasta de produção exista, sem apagar nada
+            mkdir -p /opt/pay
+
+            # Apaga APENAS os arquivos antigos que serão substituídos, preservando o .env
+            rm -f /opt/pay/docker-compose.yml /opt/pay/Dockerfile /opt/pay/*.jar
+
+            # Copia os arquivos novos do build
+            cp /var/runner/pay/docker-compose.yml /opt/pay/
+            cp /var/runner/pay/Dockerfile /opt/pay/
+            cp /var/runner/pay/target/payment-api-*.jar /opt/pay/app.jar
+
+            # Reinicia os containers
+            cd /opt/pay
+            docker system prune -f
+            docker compose down
+            docker compose up -d --build
+
+            echo "--- Deploy concluído com sucesso!"
+          EOF
