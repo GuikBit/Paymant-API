@@ -1,6 +1,7 @@
 package br.com.holding.payments.webhook;
 
 import br.com.holding.payments.common.errors.IllegalStateTransitionException;
+import br.com.holding.payments.tenant.CrossTenant;
 import br.com.holding.payments.tenant.TenantContext;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -46,6 +47,7 @@ public class WebhookProcessor {
 
     @Scheduled(fixedDelayString = "${app.webhook.processor-interval-ms:3000}")
     @Transactional
+    @CrossTenant(reason = "Processador de webhooks precisa ler eventos de todas as empresas; o tenant e definido por evento em processEvent()")
     public void processEvents() {
         List<WebhookEvent> events = webhookEventRepository.findEventsToProcess(
                 LocalDateTime.now(), BATCH_SIZE);
