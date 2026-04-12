@@ -31,7 +31,7 @@ jobs:
           REPO_URL="git@github.com:GuikBit/Paymant-API.git"
           TARGET_DIR="/var/runner/pay"
 
-          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
+          ssh -A -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
             set -e
 
             if [ -d "$TARGET_DIR/.git" ]; then
@@ -55,7 +55,7 @@ jobs:
 
       - name: Deploy e Reinício do Serviço
         run: |
-          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
+          ssh -A -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} << EOF
             set -e
             echo "--- Preparando a pasta de produção..."
 
