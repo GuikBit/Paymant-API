@@ -52,7 +52,7 @@ public interface ReportRepository extends JpaRepository<Charge, Long> {
     // ==================== MRR ====================
 
     @Query(value = """
-            SELECT COALESCE(SUM(s.effective_price), 0)
+            SELECT COALESCE(SUM(s.effective_price - COALESCE(s.coupon_discount_amount, 0)), 0)
             FROM subscriptions s
             WHERE s.status = 'ACTIVE'
             """, nativeQuery = true)
@@ -98,4 +98,40 @@ public interface ReportRepository extends JpaRepository<Charge, Long> {
             ORDER BY total_overdue_value DESC
             """, nativeQuery = true)
     List<Object[]> findOverdueSummary();
+
+    // ==================== DASHBOARD ====================
+
+    @Query(value = """
+            SELECT COUNT(*) FROM customers WHERE deleted_at IS NULL
+            """, nativeQuery = true)
+    long countActiveCustomers();
+
+    @Query(value = """
+            SELECT COUNT(*) FROM charges WHERE status = 'OVERDUE'
+            """, nativeQuery = true)
+    long countOverdueCharges();
+
+    @Query(value = """
+            SELECT COALESCE(SUM(value), 0) FROM charges WHERE status = 'OVERDUE'
+            """, nativeQuery = true)
+    BigDecimal sumOverdueValue();
+
+    @Query(value = """
+            SELECT COUNT(*) FROM charges
+            WHERE status IN ('CONFIRMED', 'RECEIVED')
+              AND due_date >= :from AND due_date <= :to
+            """, nativeQuery = true)
+    long countReceivedChargesInPeriod(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query(value = """
+            SELECT COALESCE(SUM(value), 0) FROM charges
+            WHERE status IN ('CONFIRMED', 'RECEIVED')
+              AND due_date >= :from AND due_date <= :to
+            """, nativeQuery = true)
+    BigDecimal sumRevenueInPeriod(@Param("from") LocalDate from, @Param("to") LocalDate to);
+
+    @Query(value = """
+            SELECT COUNT(*) FROM charges
+            """, nativeQuery = true)
+    long countAllCharges();
 }

@@ -5,6 +5,9 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -44,5 +47,14 @@ public class AuthController {
                     "O usuario criado recebe as roles especificadas e pode fazer login imediatamente.")
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody CreateUserRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.createUser(request));
+    }
+
+    @GetMapping("/users")
+    @PreAuthorize("hasAnyRole('HOLDING_ADMIN', 'COMPANY_ADMIN')")
+    @Operation(summary = "Listar usuarios",
+            description = "HOLDING_ADMIN visualiza todos os usuarios do sistema. " +
+                    "COMPANY_ADMIN visualiza apenas os usuarios da sua empresa.")
+    public ResponseEntity<Page<UserResponse>> listUsers(@PageableDefault(size = 20) Pageable pageable) {
+        return ResponseEntity.ok(authService.listUsers(pageable));
     }
 }

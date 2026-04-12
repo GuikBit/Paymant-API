@@ -1,6 +1,7 @@
 package br.com.holding.payments.company;
 
 import br.com.holding.payments.company.dto.*;
+import br.com.holding.payments.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -22,6 +23,16 @@ import java.util.Map;
 public class CompanyController {
 
     private final CompanyService companyService;
+
+    @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
+    @Operation(summary = "Obter dados da minha empresa",
+            description = "Retorna os dados da empresa vinculada ao usuario autenticado. "
+                    + "Qualquer usuario autenticado pode acessar este endpoint para obter o nome e dados da sua empresa.")
+    public ResponseEntity<CompanyResponse> getMyCompany() {
+        Long companyId = TenantContext.getRequiredCompanyId();
+        return ResponseEntity.ok(companyService.findById(companyId));
+    }
 
     @PostMapping
     @Operation(summary = "Cadastrar nova empresa",

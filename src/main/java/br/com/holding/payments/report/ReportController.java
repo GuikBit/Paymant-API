@@ -50,4 +50,13 @@ public class ReportController {
     public List<OverdueReportEntry> overdue() {
         return reportService.getOverdue();
     }
+
+    @GetMapping("/dashboard")
+    @Operation(summary = "Dashboard geral da organizacao",
+            description = "Retorna todos os dados agregados para popular o dashboard: MRR, ARR, "
+                    + "total de clientes, assinaturas ativas, cobrancas, receita do mes, churn, "
+                    + "receita por metodo de pagamento e top clientes inadimplentes.")
+    public DashboardResponse dashboard() {
+        return reportService.getDashboard();
+    }
 }

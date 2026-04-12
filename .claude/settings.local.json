@@ -25,7 +25,8 @@
       "Read(//c/Users/Pluri Sistemas/**)",
       "Bash(find \"/c\" -maxdepth 5 -name \"java.exe\" -path \"*21*\")",
       "Bash(export JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\")",
-      "Bash(./mvnw clean:*)"
+      "Bash(./mvnw clean:*)",
+      "Bash(xargs basename:*)"
     ]
   }
 }

@@ -5,8 +5,14 @@ import br.com.holding.payments.common.errors.BusinessException;
 import br.com.holding.payments.common.errors.ResourceNotFoundException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.company.CompanyRepository;
+import br.com.holding.payments.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,9 +78,33 @@ public class AuthService {
 
         user = userRepository.save(user);
 
+        return toUserResponse(user, company);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<UserResponse> listUsers(Pageable pageable) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean isHoldingAdmin = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(a -> a.equals("ROLE_HOLDING_ADMIN"));
+
+        if (isHoldingAdmin) {
+            return userRepository.findAll(pageable).map(u -> toUserResponse(u, u.getCompany()));
+        }
+
+        Long companyId = TenantContext.getRequiredCompanyId();
+        return userRepository.findByCompanyId(companyId, pageable).map(u -> toUserResponse(u, u.getCompany()));
+    }
+
+    private UserResponse toUserResponse(UserEntity user, Company company) {
+        String companyName = company.getNomeFantasia() != null
+                ? company.getNomeFantasia()
+                : company.getRazaoSocial();
+
         return new UserResponse(
                 user.getId(),
                 company.getId(),
+                companyName,
                 user.getEmail(),
                 user.getName(),
                 user.getRoleSet(),

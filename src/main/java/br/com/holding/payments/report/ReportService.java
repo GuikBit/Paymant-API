@@ -70,4 +70,63 @@ public class ReportService {
                         (BigDecimal) row[3]))
                 .toList();
     }
+
+    @Transactional(readOnly = true)
+    public DashboardResponse getDashboard() {
+        // MRR / ARR
+        BigDecimal mrr = reportRepository.calculateMrr();
+        BigDecimal arr = mrr.multiply(BigDecimal.valueOf(12));
+        long activeSubscriptions = reportRepository.countActiveSubscriptions();
+
+        // Totais
+        long totalCustomers = reportRepository.countActiveCustomers();
+        long totalCharges = reportRepository.countAllCharges();
+        long totalOverdueCharges = reportRepository.countOverdueCharges();
+        BigDecimal totalOverdueValue = reportRepository.sumOverdueValue();
+
+        // Mês atual
+        LocalDate monthStart = LocalDate.now().withDayOfMonth(1);
+        LocalDate monthEnd = LocalDate.now();
+
+        BigDecimal revenueCurrentMonth = reportRepository.sumRevenueInPeriod(monthStart, monthEnd);
+        long chargesReceivedCurrentMonth = reportRepository.countReceivedChargesInPeriod(monthStart, monthEnd);
+
+        // Churn do mês
+        long canceledCurrentMonth = reportRepository.countCanceledInPeriod(monthStart, monthEnd);
+        long activeAtMonthStart = reportRepository.countActiveAtDate(monthStart);
+        BigDecimal churnRate = activeAtMonthStart > 0
+                ? BigDecimal.valueOf(canceledCurrentMonth)
+                    .divide(BigDecimal.valueOf(activeAtMonthStart), 4, RoundingMode.HALF_EVEN)
+                    .multiply(BigDecimal.valueOf(100))
+                    .setScale(2, RoundingMode.HALF_EVEN)
+                : BigDecimal.ZERO;
+
+        // Receita por método (mês atual)
+        List<RevenueReportEntry> revenueByMethod = reportRepository.revenueByMethod(monthStart, monthEnd).stream()
+                .map(row -> new RevenueReportEntry(
+                        (String) row[0],
+                        ((Number) row[1]).longValue(),
+                        (BigDecimal) row[2]))
+                .toList();
+
+        // Top inadimplentes (limitado a 10)
+        List<OverdueReportEntry> topOverdue = reportRepository.findOverdueSummary().stream()
+                .limit(10)
+                .map(row -> new OverdueReportEntry(
+                        ((Number) row[0]).longValue(),
+                        (String) row[1],
+                        ((Number) row[2]).longValue(),
+                        (BigDecimal) row[3]))
+                .toList();
+
+        return new DashboardResponse(
+                LocalDateTime.now(),
+                mrr, arr,
+                totalCustomers, activeSubscriptions, totalCharges,
+                totalOverdueCharges, totalOverdueValue,
+                revenueCurrentMonth, chargesReceivedCurrentMonth,
+                canceledCurrentMonth, churnRate,
+                revenueByMethod, topOverdue
+        );
+    }
 }
