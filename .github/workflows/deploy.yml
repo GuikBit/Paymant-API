@@ -63,11 +63,13 @@ jobs:
             mkdir -p /opt/pay
 
             # Apaga APENAS os arquivos antigos que serão substituídos, preservando o .env
-            rm -f /opt/pay/docker-compose.yml /opt/pay/Dockerfile /opt/pay/*.jar
+            rm -f /opt/pay/docker-compose.yml /opt/pay/Dockerfile.prod /opt/pay/*.jar
+            rm -rf /opt/pay/docker
 
             # Copia os arquivos novos do build
             cp /var/runner/pay/docker-compose.yml /opt/pay/
-            cp /var/runner/pay/Dockerfile /opt/pay/
+            cp /var/runner/pay/Dockerfile.prod /opt/pay/
+            cp -r /var/runner/pay/docker /opt/pay/
             cp /var/runner/pay/target/payment-api-*.jar /opt/pay/app.jar
 
             # Reinicia os containers
