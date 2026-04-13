@@ -67,6 +67,35 @@ public class WebhookService {
     }
 
     @Transactional(readOnly = true)
+    public Page<WebhookEventResponse> findAll(WebhookEventStatus status, String eventType, Pageable pageable) {
+        Page<WebhookEvent> page;
+        if (status != null && eventType != null && !eventType.isBlank()) {
+            page = webhookEventRepository.findByStatusAndEventType(status, eventType, pageable);
+        } else if (status != null) {
+            page = webhookEventRepository.findByStatus(status, pageable);
+        } else if (eventType != null && !eventType.isBlank()) {
+            page = webhookEventRepository.findByEventType(eventType, pageable);
+        } else {
+            page = webhookEventRepository.findAll(pageable);
+        }
+        return page.map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public WebhookEventResponse findOne(Long id) {
+        WebhookEvent event = webhookEventRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("WebhookEvent", id));
+        return toResponse(event);
+    }
+
+    @Transactional(readOnly = true)
+    public String getPayload(Long id) {
+        return webhookEventRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("WebhookEvent", id))
+                .getPayload();
+    }
+
+    @Transactional(readOnly = true)
     public WebhookSummaryResponse getSummary() {
         long pending = webhookEventRepository.countByStatus(WebhookEventStatus.PENDING);
         long processing = webhookEventRepository.countByStatus(WebhookEventStatus.PROCESSING);

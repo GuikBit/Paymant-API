@@ -37,6 +37,10 @@ public interface WebhookEventRepository extends JpaRepository<WebhookEvent, Long
 
     Page<WebhookEvent> findByStatus(WebhookEventStatus status, Pageable pageable);
 
+    Page<WebhookEvent> findByEventType(String eventType, Pageable pageable);
+
+    Page<WebhookEvent> findByStatusAndEventType(WebhookEventStatus status, String eventType, Pageable pageable);
+
     Page<WebhookEvent> findByCompanyId(Long companyId, Pageable pageable);
 
     long countByStatus(WebhookEventStatus status);
