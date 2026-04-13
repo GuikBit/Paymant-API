@@ -7,6 +7,7 @@ import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
+import org.springframework.aop.support.AopUtils;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -54,7 +55,10 @@ public class TenantRlsAspect {
     private boolean isCrossTenant(ProceedingJoinPoint joinPoint) {
         try {
             MethodSignature signature = (MethodSignature) joinPoint.getSignature();
-            Method method = signature.getMethod();
+            Class<?> targetClass = joinPoint.getTarget() != null
+                    ? joinPoint.getTarget().getClass()
+                    : signature.getDeclaringType();
+            Method method = AopUtils.getMostSpecificMethod(signature.getMethod(), targetClass);
             return method.isAnnotationPresent(CrossTenant.class);
         } catch (Exception e) {
             return false;
