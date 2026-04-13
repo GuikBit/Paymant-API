@@ -25,3 +25,11 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
   asaas:
     base-url: https://sandbox.asaas.com/api/v3
+  master-seed:
+    enabled: ${MASTER_SEED_ENABLED:false}
+    email: ${MASTER_SEED_EMAIL:}
+    password: ${MASTER_SEED_PASSWORD:}
+    name: ${MASTER_SEED_NAME:Master Admin}
+    company-cnpj: ${MASTER_SEED_COMPANY_CNPJ:00000000000100}
+    company-razao-social: ${MASTER_SEED_COMPANY_RAZAO_SOCIAL:Holding Master LTDA}
+    company-nome-fantasia: ${MASTER_SEED_COMPANY_NOME_FANTASIA:Holding Master}
