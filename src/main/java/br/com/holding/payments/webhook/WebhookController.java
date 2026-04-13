@@ -1,5 +1,6 @@
 package br.com.holding.payments.webhook;
 
+import br.com.holding.payments.tenant.TenantContext;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +25,12 @@ public class WebhookController {
             @RequestParam(value = "companyId") Long companyId,
             @RequestBody String rawPayload) {
 
-        webhookService.receive(companyId, accessToken, rawPayload);
+        TenantContext.setCompanyId(companyId);
+        try {
+            webhookService.receive(companyId, accessToken, rawPayload);
+        } finally {
+            TenantContext.clear();
+        }
         return ResponseEntity.ok().build();
     }
 }
