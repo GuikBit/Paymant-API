@@ -33,8 +33,11 @@ public class TenantRlsAspect {
     @Around("@annotation(org.springframework.transaction.annotation.Transactional) || " +
             "@within(org.springframework.transaction.annotation.Transactional)")
     public Object setTenantContext(ProceedingJoinPoint joinPoint) throws Throwable {
-        // Skip RLS for @CrossTenant methods
         if (isCrossTenant(joinPoint)) {
+            // RLS policies allow visibility when app.bypass_rls = 'true' (see V7).
+            // SET LOCAL keeps the bypass scoped to the current transaction.
+            entityManager.createNativeQuery("SET LOCAL app.bypass_rls = 'true'")
+                    .executeUpdate();
             return joinPoint.proceed();
         }
 
