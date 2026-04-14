@@ -15,8 +15,9 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/api/v1/admin/reconciliation")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('HOLDING_ADMIN')")
-@Tag(name = "Reconciliacao", description = "Conciliacao de dados com Asaas e replay de DLQ")
+@PreAuthorize("hasAnyRole('HOLDING_ADMIN', 'COMPANY_ADMIN')")
+@Tag(name = "Reconciliacao", description = "Conciliacao de dados com Asaas e replay de DLQ. " +
+        "Todos os endpoints sao escopados pela empresa do usuario autenticado.")
 public class ReconciliationController {
 
     private final ReconciliationService reconciliationService;
@@ -43,6 +44,7 @@ public class ReconciliationController {
     @Operation(summary = "Reprocessar eventos DLQ",
             description = "Marca eventos em DLQ (webhook e outbox) como PENDING para nova tentativa")
     public DlqReplayResult replayDlq() {
-        return reconciliationService.replayDLQ();
+        Long companyId = TenantContext.getRequiredCompanyId();
+        return reconciliationService.replayDLQ(companyId);
     }
 }

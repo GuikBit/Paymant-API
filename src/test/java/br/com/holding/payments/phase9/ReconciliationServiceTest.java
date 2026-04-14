@@ -315,12 +315,12 @@ class ReconciliationServiceTest {
         void replayWebhookDlq_shouldMarkPending() {
             WebhookEvent event = WebhookEvent.builder()
                     .id(1L).status(WebhookEventStatus.DLQ).attemptCount(10).build();
-            when(webhookEventRepository.findByStatus(eq(WebhookEventStatus.DLQ), any(Pageable.class)))
+            when(webhookEventRepository.findByStatusAndCompanyId(eq(WebhookEventStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(event)));
-            when(outboxEventRepository.findByStatus(eq(OutboxStatus.DLQ), any(Pageable.class)))
+            when(outboxEventRepository.findByStatusAndCompanyId(eq(OutboxStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
 
-            DlqReplayResult result = service.replayDLQ();
+            DlqReplayResult result = service.replayDLQ(99L);
 
             assertThat(result.webhookEventsReplayed()).isEqualTo(1);
             assertThat(result.outboxEventsReplayed()).isZero();
@@ -334,12 +334,12 @@ class ReconciliationServiceTest {
         void replayOutboxDlq_shouldResetStatusAndAttempts() {
             OutboxEvent event = OutboxEvent.builder()
                     .id(1L).status(OutboxStatus.DLQ).attemptCount(5).lastError("timeout").build();
-            when(webhookEventRepository.findByStatus(eq(WebhookEventStatus.DLQ), any(Pageable.class)))
+            when(webhookEventRepository.findByStatusAndCompanyId(eq(WebhookEventStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(outboxEventRepository.findByStatus(eq(OutboxStatus.DLQ), any(Pageable.class)))
+            when(outboxEventRepository.findByStatusAndCompanyId(eq(OutboxStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(event)));
 
-            DlqReplayResult result = service.replayDLQ();
+            DlqReplayResult result = service.replayDLQ(99L);
 
             assertThat(result.webhookEventsReplayed()).isZero();
             assertThat(result.outboxEventsReplayed()).isEqualTo(1);
@@ -356,12 +356,12 @@ class ReconciliationServiceTest {
             WebhookEvent we2 = WebhookEvent.builder().id(2L).status(WebhookEventStatus.DLQ).build();
             OutboxEvent oe1 = OutboxEvent.builder().id(10L).status(OutboxStatus.DLQ).attemptCount(3).build();
 
-            when(webhookEventRepository.findByStatus(eq(WebhookEventStatus.DLQ), any(Pageable.class)))
+            when(webhookEventRepository.findByStatusAndCompanyId(eq(WebhookEventStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(we1, we2)));
-            when(outboxEventRepository.findByStatus(eq(OutboxStatus.DLQ), any(Pageable.class)))
+            when(outboxEventRepository.findByStatusAndCompanyId(eq(OutboxStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(List.of(oe1)));
 
-            DlqReplayResult result = service.replayDLQ();
+            DlqReplayResult result = service.replayDLQ(99L);
 
             assertThat(result.webhookEventsReplayed()).isEqualTo(2);
             assertThat(result.outboxEventsReplayed()).isEqualTo(1);
@@ -371,12 +371,12 @@ class ReconciliationServiceTest {
         @Test
         @DisplayName("Nenhum evento em DLQ - resultado zerado")
         void noDlqEvents_shouldReturnZeroes() {
-            when(webhookEventRepository.findByStatus(eq(WebhookEventStatus.DLQ), any(Pageable.class)))
+            when(webhookEventRepository.findByStatusAndCompanyId(eq(WebhookEventStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(outboxEventRepository.findByStatus(eq(OutboxStatus.DLQ), any(Pageable.class)))
+            when(outboxEventRepository.findByStatusAndCompanyId(eq(OutboxStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
 
-            DlqReplayResult result = service.replayDLQ();
+            DlqReplayResult result = service.replayDLQ(99L);
 
             assertThat(result.totalReplayed()).isZero();
             verify(webhookEventRepository, never()).save(any());
@@ -386,12 +386,12 @@ class ReconciliationServiceTest {
         @Test
         @DisplayName("Resultado contem timestamp")
         void result_shouldContainTimestamp() {
-            when(webhookEventRepository.findByStatus(eq(WebhookEventStatus.DLQ), any(Pageable.class)))
+            when(webhookEventRepository.findByStatusAndCompanyId(eq(WebhookEventStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
-            when(outboxEventRepository.findByStatus(eq(OutboxStatus.DLQ), any(Pageable.class)))
+            when(outboxEventRepository.findByStatusAndCompanyId(eq(OutboxStatus.DLQ), eq(99L), any(Pageable.class)))
                     .thenReturn(new PageImpl<>(Collections.emptyList()));
 
-            DlqReplayResult result = service.replayDLQ();
+            DlqReplayResult result = service.replayDLQ(99L);
 
             assertThat(result.executedAt()).isNotNull();
         }

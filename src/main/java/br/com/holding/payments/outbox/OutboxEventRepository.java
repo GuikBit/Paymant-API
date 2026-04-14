@@ -17,10 +17,20 @@ public interface OutboxEventRepository extends JpaRepository<OutboxEvent, Long> 
 
     Page<OutboxEvent> findByStatus(OutboxStatus status, Pageable pageable);
 
+    Page<OutboxEvent> findByStatusAndCompanyId(OutboxStatus status, Long companyId, Pageable pageable);
+
     @Query("SELECT COUNT(e) FROM OutboxEvent e WHERE e.status = :status")
     long countByStatus(@Param("status") OutboxStatus status);
+
+    @Query("SELECT COUNT(e) FROM OutboxEvent e WHERE e.status = :status AND e.company.id = :companyId")
+    long countByStatusAndCompanyId(@Param("status") OutboxStatus status, @Param("companyId") Long companyId);
 
     @Query(value = "SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) FROM outbox WHERE status = 'PENDING'",
             nativeQuery = true)
     Double calculateLagSeconds();
+
+    @Query(value = "SELECT EXTRACT(EPOCH FROM (NOW() - MIN(created_at))) FROM outbox " +
+            "WHERE status = 'PENDING' AND company_id = :companyId",
+            nativeQuery = true)
+    Double calculateLagSecondsByCompanyId(@Param("companyId") Long companyId);
 }

@@ -3,7 +3,7 @@ package br.com.holding.payments.outbox;
 import br.com.holding.payments.common.errors.ResourceNotFoundException;
 import br.com.holding.payments.outbox.dto.OutboxEventResponse;
 import br.com.holding.payments.outbox.dto.OutboxSummaryResponse;
-import br.com.holding.payments.tenant.CrossTenant;
+import br.com.holding.payments.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,26 +17,25 @@ public class OutboxAdminService {
     private final OutboxEventRepository outboxEventRepository;
 
     @Transactional(readOnly = true)
-    @CrossTenant(reason = "Admin views all tenants' outbox events")
     public Page<OutboxEventResponse> findByStatus(OutboxStatus status, Pageable pageable) {
-        return outboxEventRepository.findByStatus(status, pageable)
+        Long companyId = TenantContext.getRequiredCompanyId();
+        return outboxEventRepository.findByStatusAndCompanyId(status, companyId, pageable)
                 .map(this::toResponse);
     }
 
     @Transactional(readOnly = true)
-    @CrossTenant(reason = "Admin views all tenants' outbox summary")
     public OutboxSummaryResponse getSummary() {
+        Long companyId = TenantContext.getRequiredCompanyId();
         return new OutboxSummaryResponse(
-                outboxEventRepository.countByStatus(OutboxStatus.PENDING),
-                outboxEventRepository.countByStatus(OutboxStatus.PUBLISHED),
-                outboxEventRepository.countByStatus(OutboxStatus.FAILED),
-                outboxEventRepository.countByStatus(OutboxStatus.DLQ),
-                outboxEventRepository.calculateLagSeconds()
+                outboxEventRepository.countByStatusAndCompanyId(OutboxStatus.PENDING, companyId),
+                outboxEventRepository.countByStatusAndCompanyId(OutboxStatus.PUBLISHED, companyId),
+                outboxEventRepository.countByStatusAndCompanyId(OutboxStatus.FAILED, companyId),
+                outboxEventRepository.countByStatusAndCompanyId(OutboxStatus.DLQ, companyId),
+                outboxEventRepository.calculateLagSecondsByCompanyId(companyId)
         );
     }
 
     @Transactional
-    @CrossTenant(reason = "Admin retries events from any tenant")
     public void retryEvent(Long eventId) {
         OutboxEvent event = outboxEventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("OutboxEvent", eventId));

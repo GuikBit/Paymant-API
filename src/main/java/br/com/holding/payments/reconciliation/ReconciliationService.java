@@ -183,15 +183,15 @@ public class ReconciliationService {
     }
 
     /**
-     * Replays all DLQ events (webhook + outbox) by marking them as PENDING for retry.
+     * Replays DLQ events (webhook + outbox) for the given company by marking them as PENDING.
      */
     @Transactional
-    public DlqReplayResult replayDLQ() {
-        log.info("Starting DLQ replay");
+    public DlqReplayResult replayDLQ(Long companyId) {
+        log.info("Starting DLQ replay for company={}", companyId);
 
         long webhookReplayed = 0;
-        Page<WebhookEvent> webhookDlq = webhookEventRepository.findByStatus(
-                WebhookEventStatus.DLQ, PageRequest.of(0, 200));
+        Page<WebhookEvent> webhookDlq = webhookEventRepository.findByStatusAndCompanyId(
+                WebhookEventStatus.DLQ, companyId, PageRequest.of(0, 200));
         for (WebhookEvent event : webhookDlq.getContent()) {
             event.markReadyForRetry();
             webhookEventRepository.save(event);
@@ -200,8 +200,8 @@ public class ReconciliationService {
         }
 
         long outboxReplayed = 0;
-        Page<OutboxEvent> outboxDlq = outboxEventRepository.findByStatus(
-                OutboxStatus.DLQ, PageRequest.of(0, 200));
+        Page<OutboxEvent> outboxDlq = outboxEventRepository.findByStatusAndCompanyId(
+                OutboxStatus.DLQ, companyId, PageRequest.of(0, 200));
         for (OutboxEvent event : outboxDlq.getContent()) {
             event.setStatus(OutboxStatus.PENDING);
             event.setAttemptCount(0);
@@ -211,7 +211,8 @@ public class ReconciliationService {
             dlqReplayCounter.increment();
         }
 
-        log.info("DLQ replay complete: webhook={}, outbox={}", webhookReplayed, outboxReplayed);
+        log.info("DLQ replay complete for company={}: webhook={}, outbox={}",
+                companyId, webhookReplayed, outboxReplayed);
 
         return new DlqReplayResult(LocalDateTime.now(), webhookReplayed, outboxReplayed,
                 webhookReplayed + outboxReplayed);

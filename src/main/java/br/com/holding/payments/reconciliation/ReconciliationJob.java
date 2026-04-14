@@ -44,6 +44,7 @@ public class ReconciliationJob {
                         company.getId(), since);
                 ReconciliationResult subResult = reconciliationService.reconcileSubscriptions(
                         company.getId());
+                reconciliationService.replayDLQ(company.getId());
 
                 log.info("Reconciliation for company={}: charges(checked={}, divergences={}), " +
                                 "subscriptions(checked={}, divergences={})",
@@ -55,13 +56,6 @@ public class ReconciliationJob {
             } finally {
                 TenantContext.clear();
             }
-        }
-
-        // Also replay DLQ
-        try {
-            reconciliationService.replayDLQ();
-        } catch (Exception e) {
-            log.error("DLQ replay failed: {}", e.getMessage(), e);
         }
 
         log.info("Daily reconciliation job complete");

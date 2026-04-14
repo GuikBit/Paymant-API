@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/v1/admin/outbox")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('HOLDING_ADMIN')")
+@PreAuthorize("hasAnyRole('HOLDING_ADMIN', 'COMPANY_ADMIN')")
 @Tag(name = "Admin - Outbox", description = "Endpoints administrativos para inspecao e gerenciamento de eventos do outbox. " +
         "O outbox armazena eventos de dominio que precisam ser publicados para sistemas externos (n8n, BI, ERPs). " +
-        "Apenas administradores da holding tem acesso.")
+        "Os resultados sao filtrados pela empresa do usuario autenticado.")
 public class OutboxAdminController {
 
     private final OutboxAdminService outboxAdminService;
