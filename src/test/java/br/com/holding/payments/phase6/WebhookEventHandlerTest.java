@@ -91,9 +91,9 @@ class WebhookEventHandlerTest {
             when(chargeRepository.save(any())).thenReturn(charge);
 
             WebhookEvent event = buildEvent("PAYMENT_RECEIVED", paymentPayload("pay_001"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(charge.getStatus()).isEqualTo(ChargeStatus.RECEIVED);
             verify(outboxPublisher).publish(eq(1L), eq("ChargePaidEvent"), eq("Charge"), eq("1"), anyString());
         }
@@ -104,9 +104,9 @@ class WebhookEventHandlerTest {
             when(chargeRepository.findByAsaasId("pay_missing")).thenReturn(Optional.empty());
 
             WebhookEvent event = buildEvent("PAYMENT_RECEIVED", paymentPayload("pay_missing"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isFalse();
+            assertThat(result.processed()).isFalse();
             verify(chargeRepository, never()).save(any());
         }
 
@@ -145,9 +145,9 @@ class WebhookEventHandlerTest {
                     {"event":"PAYMENT_CONFIRMED","payment":{"id":"pay_003","customer":"cus_123","billingType":"CREDIT_CARD","value":50.00,"status":"CONFIRMED"}}
                     """;
             WebhookEvent event = buildEvent("PAYMENT_CONFIRMED", payload);
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(charge.getStatus()).isEqualTo(ChargeStatus.CONFIRMED);
             verify(outboxPublisher).publish(eq(1L), eq("ChargeConfirmedEvent"), eq("Charge"), eq("3"), anyString());
         }
@@ -189,9 +189,9 @@ class WebhookEventHandlerTest {
                     {"event":"PAYMENT_UPDATED","payment":{"id":"pay_005","customer":"cus_123","billingType":"PIX","value":100.00,"status":"PENDING"}}
                     """;
             WebhookEvent event = buildEvent("PAYMENT_UPDATED", payload);
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(charge.getStatus()).isEqualTo(ChargeStatus.PENDING);
             verify(chargeRepository, never()).save(any());
         }
@@ -200,9 +200,9 @@ class WebhookEventHandlerTest {
         @DisplayName("Tipo de evento desconhecido eh marcado como processado")
         void unknownEventType_shouldBeProcessed() {
             WebhookEvent event = buildEvent("SOME_FUTURE_EVENT", "{}");
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
         }
     }
 
@@ -222,9 +222,9 @@ class WebhookEventHandlerTest {
 
             WebhookEvent event = buildEvent("SUBSCRIPTION_DELETED",
                     subscriptionPayload("sub_001", "SUBSCRIPTION_DELETED"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
             verify(outboxPublisher).publish(eq(1L), eq("SubscriptionCanceledEvent"),
                     eq("Subscription"), eq("10"), anyString());
@@ -242,9 +242,9 @@ class WebhookEventHandlerTest {
 
             WebhookEvent event = buildEvent("SUBSCRIPTION_DELETED",
                     subscriptionPayload("sub_002", "SUBSCRIPTION_DELETED"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.CANCELED);
             verify(outboxPublisher, never()).publish(anyLong(), anyString(), anyString(), anyString(), anyString());
         }
@@ -261,9 +261,9 @@ class WebhookEventHandlerTest {
 
             WebhookEvent event = buildEvent("SUBSCRIPTION_UPDATED",
                     subscriptionPayload("sub_003", "SUBSCRIPTION_UPDATED"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isTrue();
+            assertThat(result.processed()).isTrue();
             assertThat(subscription.getStatus()).isEqualTo(SubscriptionStatus.ACTIVE);
             verify(outboxPublisher).publish(eq(1L), eq("SubscriptionUpdatedEvent"),
                     eq("Subscription"), eq("12"), anyString());
@@ -276,9 +276,9 @@ class WebhookEventHandlerTest {
 
             WebhookEvent event = buildEvent("SUBSCRIPTION_DELETED",
                     subscriptionPayload("sub_missing", "SUBSCRIPTION_DELETED"));
-            boolean result = handler.handle(event);
+            var result = handler.handle(event);
 
-            assertThat(result).isFalse();
+            assertThat(result.processed()).isFalse();
         }
     }
 }

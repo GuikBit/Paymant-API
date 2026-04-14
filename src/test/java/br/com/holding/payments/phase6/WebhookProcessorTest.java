@@ -3,6 +3,7 @@ package br.com.holding.payments.phase6;
 import br.com.holding.payments.common.errors.IllegalStateTransitionException;
 import br.com.holding.payments.company.Company;
 import br.com.holding.payments.webhook.*;
+import br.com.holding.payments.webhook.WebhookEventHandler.HandleResult;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -60,7 +61,7 @@ class WebhookProcessorTest {
     void processEvents_success_shouldMarkProcessed() {
         WebhookEvent event = buildEvent("PAYMENT_RECEIVED");
         when(webhookEventRepository.findEventsToProcess(any(), anyInt())).thenReturn(List.of(event));
-        when(webhookEventHandler.handle(event)).thenReturn(true);
+        when(webhookEventHandler.handle(event)).thenReturn(HandleResult.processed("ok"));
 
         processor.processEvents();
 
@@ -74,7 +75,7 @@ class WebhookProcessorTest {
     void processEvents_resourceNotFound_shouldDefer() {
         WebhookEvent event = buildEvent("PAYMENT_RECEIVED");
         when(webhookEventRepository.findEventsToProcess(any(), anyInt())).thenReturn(List.of(event));
-        when(webhookEventHandler.handle(event)).thenReturn(false);
+        when(webhookEventHandler.handle(event)).thenReturn(HandleResult.deferred("Resource not found"));
 
         processor.processEvents();
 
@@ -91,7 +92,7 @@ class WebhookProcessorTest {
         WebhookEvent event = buildEvent("PAYMENT_RECEIVED");
         event.setAttemptCount(10); // already at max
         when(webhookEventRepository.findEventsToProcess(any(), anyInt())).thenReturn(List.of(event));
-        when(webhookEventHandler.handle(event)).thenReturn(false);
+        when(webhookEventHandler.handle(event)).thenReturn(HandleResult.deferred("Resource not found"));
 
         processor.processEvents();
 
@@ -150,7 +151,7 @@ class WebhookProcessorTest {
 
         when(webhookEventRepository.findEventsToProcess(any(), anyInt()))
                 .thenReturn(List.of(event1, event2, event3));
-        when(webhookEventHandler.handle(any())).thenReturn(true);
+        when(webhookEventHandler.handle(any())).thenReturn(HandleResult.processed("ok"));
 
         processor.processEvents();
 
@@ -165,7 +166,7 @@ class WebhookProcessorTest {
     void processEvents_shouldRecordMetrics() {
         WebhookEvent event = buildEvent("PAYMENT_RECEIVED");
         when(webhookEventRepository.findEventsToProcess(any(), anyInt())).thenReturn(List.of(event));
-        when(webhookEventHandler.handle(event)).thenReturn(true);
+        when(webhookEventHandler.handle(event)).thenReturn(HandleResult.processed("ok"));
 
         processor.processEvents();
 
