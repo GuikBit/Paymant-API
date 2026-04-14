@@ -59,13 +59,36 @@ public class WebhookEvent {
     @Builder.Default
     private LocalDateTime receivedAt = LocalDateTime.now();
 
+    @Column(name = "processed_resource_type", length = 40)
+    private String processedResourceType;
+
+    @Column(name = "processed_resource_id")
+    private Long processedResourceId;
+
+    @Column(name = "processed_asaas_id")
+    private String processedAsaasId;
+
+    @Column(name = "processing_summary", columnDefinition = "TEXT")
+    private String processingSummary;
+
+    @Column(name = "processing_duration_ms")
+    private Long processingDurationMs;
+
     public void markProcessing() {
         this.status = WebhookEventStatus.PROCESSING;
     }
 
-    public void markProcessed() {
+    public void markProcessed(String summary) {
         this.status = WebhookEventStatus.PROCESSED;
         this.processedAt = LocalDateTime.now();
+        this.processingSummary = summary;
+        this.processingDurationMs = java.time.Duration.between(receivedAt, processedAt).toMillis();
+    }
+
+    public void linkResource(String resourceType, Long resourceId, String asaasId) {
+        this.processedResourceType = resourceType;
+        this.processedResourceId = resourceId;
+        this.processedAsaasId = asaasId;
     }
 
     public void markDeferred(String reason, long backoffSeconds) {
@@ -73,17 +96,20 @@ public class WebhookEvent {
         this.attemptCount++;
         this.nextAttemptAt = LocalDateTime.now().plusSeconds(backoffSeconds);
         this.lastError = reason;
+        this.processingSummary = reason;
     }
 
     public void markFailed(String error) {
         this.status = WebhookEventStatus.FAILED;
         this.attemptCount++;
         this.lastError = error;
+        this.processingSummary = "Falha: " + error;
     }
 
     public void markDlq(String error) {
         this.status = WebhookEventStatus.DLQ;
         this.lastError = error;
+        this.processingSummary = "Movido para DLQ: " + error;
     }
 
     public void markReadyForRetry() {

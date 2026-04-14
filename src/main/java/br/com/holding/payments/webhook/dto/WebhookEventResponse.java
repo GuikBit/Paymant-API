@@ -13,6 +13,11 @@ public record WebhookEventResponse(
         Integer attemptCount,
         LocalDateTime nextAttemptAt,
         LocalDateTime processedAt,
+        LocalDateTime receivedAt,
         String lastError,
-        LocalDateTime receivedAt
+        String processedResourceType,
+        Long processedResourceId,
+        String processedAsaasId,
+        String processingSummary,
+        Long processingDurationMs
 ) {}

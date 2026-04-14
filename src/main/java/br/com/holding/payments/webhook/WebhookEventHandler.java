@@ -33,13 +33,13 @@ public class WebhookEventHandler {
      *
      * @throws IllegalStateTransitionException if the state transition is invalid (mark as FAILED)
      */
-    public boolean handle(WebhookEvent event) {
+    public HandleResult handle(WebhookEvent event) {
         AsaasEventType eventType;
         try {
             eventType = AsaasEventType.valueOf(event.getEventType());
         } catch (IllegalArgumentException e) {
             log.warn("Unknown event type: {}, marking as processed", event.getEventType());
-            return true;
+            return HandleResult.processed("Tipo de evento desconhecido (" + event.getEventType() + "), ignorado");
         }
 
         if (eventType.isPaymentEvent()) {
@@ -51,10 +51,10 @@ public class WebhookEventHandler {
         }
 
         log.warn("Unhandled event type: {}", event.getEventType());
-        return true;
+        return HandleResult.processed("Tipo de evento sem handler, ignorado");
     }
 
-    private boolean handlePaymentEvent(WebhookEvent event, AsaasEventType eventType) {
+    private HandleResult handlePaymentEvent(WebhookEvent event, AsaasEventType eventType) {
         AsaasWebhookPayload payload = parsePayload(event);
         if (payload == null || payload.payment() == null) {
             log.error("Invalid payment payload for event: {}", event.getAsaasEventId());
@@ -66,27 +66,27 @@ public class WebhookEventHandler {
 
         if (chargeOpt.isEmpty()) {
             log.info("Charge not found for asaasId={}, event will be deferred", asaasPaymentId);
-            return false; // Resource not found -> defer
+            return HandleResult.deferred("Cobranca asaasId=" + asaasPaymentId + " ainda nao encontrada");
         }
 
         Charge charge = chargeOpt.get();
+        event.linkResource("Charge", charge.getId(), asaasPaymentId);
 
-        // Events that don't trigger state transition (informational only)
         if (!eventType.triggersChargeTransition()) {
             log.info("Informational event {} for charge asaasId={}, no state change",
                     eventType, asaasPaymentId);
             publishOutboxEvent(event, eventType, charge);
-            return true;
+            return HandleResult.processed("Evento informativo " + eventType + " para Charge "
+                    + charge.getId() + ", sem mudanca de estado");
         }
 
-        // Transition the charge state
+        ChargeStatus previousStatus = charge.getStatus();
         ChargeStatus targetStatus = eventType.toChargeStatus();
         charge.transitionTo(targetStatus);
         chargeRepository.save(charge);
 
         publishOutboxEvent(event, eventType, charge);
 
-        // If payment received, check if it's linked to a plan change
         if (eventType == AsaasEventType.PAYMENT_RECEIVED && charge.getId() != null) {
             try {
                 planChangeService.confirmAfterPayment(charge.getId());
@@ -97,10 +97,11 @@ public class WebhookEventHandler {
 
         log.info("Charge state updated: asaasId={}, newStatus={}, event={}",
                 asaasPaymentId, targetStatus, eventType);
-        return true;
+        return HandleResult.processed("Charge " + charge.getId() + ": "
+                + previousStatus + " -> " + targetStatus + " (evento " + eventType + ")");
     }
 
-    private boolean handleSubscriptionEvent(WebhookEvent event, AsaasEventType eventType) {
+    private HandleResult handleSubscriptionEvent(WebhookEvent event, AsaasEventType eventType) {
         AsaasWebhookPayload payload = parsePayload(event);
         if (payload == null || payload.subscription() == null) {
             log.error("Invalid subscription payload for event: {}", event.getAsaasEventId());
@@ -112,28 +113,41 @@ public class WebhookEventHandler {
 
         if (subscription == null) {
             log.info("Subscription not found for asaasId={}, event will be deferred", asaasSubscriptionId);
-            return false;
+            return HandleResult.deferred("Subscription asaasId=" + asaasSubscriptionId + " ainda nao encontrada");
         }
 
-        switch (eventType) {
+        event.linkResource("Subscription", subscription.getId(), asaasSubscriptionId);
+
+        return switch (eventType) {
             case SUBSCRIPTION_UPDATED -> {
                 log.info("Subscription updated via webhook: asaasId={}", asaasSubscriptionId);
                 publishSubscriptionOutboxEvent(event, "SubscriptionUpdatedEvent", subscription);
+                yield HandleResult.processed("Subscription " + subscription.getId() + " atualizada");
             }
             case SUBSCRIPTION_DELETED -> {
                 if (subscription.getStatus().canTransitionTo(SubscriptionStatus.CANCELED)) {
+                    SubscriptionStatus previous = subscription.getStatus();
                     subscription.transitionTo(SubscriptionStatus.CANCELED);
                     publishSubscriptionOutboxEvent(event, "SubscriptionCanceledEvent", subscription);
                     log.info("Subscription canceled via webhook: asaasId={}", asaasSubscriptionId);
-                } else {
-                    log.info("Subscription already in terminal state {}, ignoring DELETED event",
-                            subscription.getStatus());
+                    yield HandleResult.processed("Subscription " + subscription.getId()
+                            + ": " + previous + " -> CANCELED");
                 }
+                log.info("Subscription already in terminal state {}, ignoring DELETED event",
+                        subscription.getStatus());
+                yield HandleResult.processed("Subscription " + subscription.getId()
+                        + " ja esta em estado terminal " + subscription.getStatus() + ", evento ignorado");
             }
-            default -> log.info("Subscription event {} received, no action needed", eventType);
-        }
+            default -> {
+                log.info("Subscription event {} received, no action needed", eventType);
+                yield HandleResult.processed("Evento " + eventType + " recebido, sem acao necessaria");
+            }
+        };
+    }
 
-        return true;
+    public record HandleResult(boolean processed, String summary) {
+        public static HandleResult processed(String summary) { return new HandleResult(true, summary); }
+        public static HandleResult deferred(String reason) { return new HandleResult(false, reason); }
     }
 
     private void publishOutboxEvent(WebhookEvent webhookEvent, AsaasEventType eventType, Charge charge) {

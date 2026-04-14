@@ -190,8 +190,13 @@ public class WebhookService {
                 event.getAttemptCount(),
                 event.getNextAttemptAt(),
                 event.getProcessedAt(),
+                event.getReceivedAt(),
                 event.getLastError(),
-                event.getReceivedAt()
+                event.getProcessedResourceType(),
+                event.getProcessedResourceId(),
+                event.getProcessedAsaasId(),
+                event.getProcessingSummary(),
+                event.getProcessingDurationMs()
         );
     }
 }

@@ -69,14 +69,14 @@ public class WebhookProcessor {
             TenantContext.setCompanyId(event.getCompany().getId());
             event.markProcessing();
 
-            boolean processed = webhookEventHandler.handle(event);
+            WebhookEventHandler.HandleResult result = webhookEventHandler.handle(event);
 
-            if (processed) {
-                event.markProcessed();
-                log.info("Webhook event processed: id={}, type={}", event.getId(), event.getEventType());
+            if (result.processed()) {
+                event.markProcessed(result.summary());
+                log.info("Webhook event processed: id={}, type={}, summary={}",
+                        event.getId(), event.getEventType(), result.summary());
             } else {
-                // Resource not found - defer with backoff
-                handleDeferred(event);
+                handleDeferred(event, result.summary());
             }
 
             webhookEventRepository.save(event);
@@ -96,11 +96,11 @@ public class WebhookProcessor {
         }
     }
 
-    private void handleDeferred(WebhookEvent event) {
+    private void handleDeferred(WebhookEvent event, String reason) {
         int attemptCount = event.getAttemptCount();
 
         if (attemptCount >= maxAttempts) {
-            event.markDlq("Max attempts reached after " + attemptCount + " deferrals. Resource never found.");
+            event.markDlq("Max attempts apos " + attemptCount + " adiamentos. " + reason);
             meterRegistry.counter("webhook_dlq_total").increment();
             log.error("Webhook event moved to DLQ: id={}, asaasEventId={}, attempts={}",
                     event.getId(), event.getAsaasEventId(), attemptCount);
@@ -108,11 +108,11 @@ public class WebhookProcessor {
         }
 
         long backoff = calculateBackoff(attemptCount);
-        event.markDeferred("Resource not found yet, deferred", backoff);
+        event.markDeferred(reason + " (proxima tentativa em " + backoff + "s)", backoff);
         meterRegistry.counter("webhook_deferred_total").increment();
 
-        log.info("Webhook event deferred: id={}, attempt={}, nextRetryIn={}s",
-                event.getId(), attemptCount + 1, backoff);
+        log.info("Webhook event deferred: id={}, attempt={}, nextRetryIn={}s, reason={}",
+                event.getId(), attemptCount + 1, backoff, reason);
     }
 
     private void handleProcessingError(WebhookEvent event, Exception e) {
