@@ -318,10 +318,18 @@ public class AsaasDataImportService {
                         }
                     }
 
-                    // Buscar subscriptionId local se a cobrança pertence a uma assinatura
+                    // Vincular a assinatura local quando o pagamento veio de uma subscription do Asaas
                     Long subscriptionId = null;
-                    if (asaasPayment.externalReference() != null) {
-                        // Tentar encontrar subscription pelo externalReference se aplicável
+                    if (asaasPayment.subscription() != null && !asaasPayment.subscription().isBlank()) {
+                        Subscription localSub = subscriptionRepository.findByAsaasId(asaasPayment.subscription()).orElse(null);
+                        if (localSub != null) {
+                            subscriptionId = localSub.getId();
+                        } else {
+                            String msg = "Cobranca " + asaasPayment.id() + ": assinatura " + asaasPayment.subscription()
+                                    + " ainda nao importada localmente, charge sera salva sem vinculo";
+                            log.warn(msg);
+                            errors.add(msg);
+                        }
                     }
 
                     Charge charge = Charge.builder()

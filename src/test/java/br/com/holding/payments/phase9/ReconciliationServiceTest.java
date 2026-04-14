@@ -65,7 +65,7 @@ class ReconciliationServiceTest {
     private AsaasPaymentResponse asaasPayment(String id, String status) {
         return new AsaasPaymentResponse(id, "cus_1", "PIX", new BigDecimal("100.00"),
                 new BigDecimal("97.00"), status, "2026-04-10", null, null, null,
-                null, null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null, null);
     }
 
     private AsaasSubscriptionResponse asaasSubscription(String id, String status) {

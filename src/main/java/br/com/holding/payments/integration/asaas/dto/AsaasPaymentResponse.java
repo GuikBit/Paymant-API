@@ -23,6 +23,7 @@ public record AsaasPaymentResponse(
         String transactionReceiptUrl,
         String installment,
         Integer installmentNumber,
+        String subscription,
         Boolean deleted,
         String dateCreated
 ) {}

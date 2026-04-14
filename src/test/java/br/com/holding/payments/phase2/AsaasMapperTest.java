@@ -43,7 +43,7 @@ class AsaasMapperTest {
         AsaasPaymentResponse asaasDto = new AsaasPaymentResponse(
                 "pay_456", "cus_123", "PIX", new BigDecimal("100.00"),
                 new BigDecimal("97.00"), "PENDING", "2024-12-31", null,
-                null, null, null, null, null, null, null, null, null, false, "2024-01-01"
+                null, null, null, null, null, null, null, null, null, null, false, "2024-01-01"
         );
 
         AsaasPaymentResult result = mapper.toPaymentResult(asaasDto);
