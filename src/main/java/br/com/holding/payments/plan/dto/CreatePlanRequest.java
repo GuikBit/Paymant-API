@@ -1,5 +1,6 @@
 package br.com.holding.payments.plan.dto;
 
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -7,6 +8,7 @@ import jakarta.validation.constraints.PositiveOrZero;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record CreatePlanRequest(
         @NotBlank(message = "Nome do plano e obrigatorio") String name,
@@ -31,7 +33,7 @@ public record CreatePlanRequest(
         LocalDateTime promoAnualFim,
         Integer trialDays,
         BigDecimal setupFee,
-        String limits,
-        String features,
+        @Valid List<PlanLimitDto> limits,
+        @Valid List<PlanLimitDto> features,
         Integer tierOrder
 ) {}

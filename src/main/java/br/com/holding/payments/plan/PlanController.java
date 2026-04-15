@@ -12,6 +12,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("/api/v1/plans")
 @RequiredArgsConstructor
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 public class PlanController {
 
     private final PlanService planService;
+    private final PlanLimitResolver planLimitResolver;
 
     @PostMapping
     @Operation(summary = "Criar novo plano",
@@ -104,6 +107,33 @@ public class PlanController {
             description = "Retorna o plano ativo com o codigo informado para a empresa do usuario autenticado.")
     public ResponseEntity<PlanResponse> findByCodigo(@PathVariable String codigo) {
         return ResponseEntity.ok(planService.findByCodigo(codigo));
+    }
+
+    @GetMapping("/{id}/limits")
+    @Operation(summary = "Listar limites do plano",
+            description = "Retorna a lista estruturada de limites do plano. Cada item contem key (slug " +
+                    "imutavel usado pelo sistema em runtime), label (texto exibivel), type (NUMBER, BOOLEAN " +
+                    "ou UNLIMITED), value (quando NUMBER) e enabled (quando BOOLEAN).")
+    public ResponseEntity<List<PlanLimitDto>> listLimits(@PathVariable Long id) {
+        return ResponseEntity.ok(planLimitResolver.listLimits(id));
+    }
+
+    @GetMapping("/{id}/limits/{key}")
+    @Operation(summary = "Consultar um limite especifico",
+            description = "Consulta um limite pela sua key. Use o parametro opcional 'usage' para saber " +
+                    "se uma operacao que elevaria o uso para esse valor seria permitida (relevante para " +
+                    "limites NUMBER). Retorna allowed=false se a key nao existir ou se o uso exceder o limite.")
+    public ResponseEntity<PlanLimitCheckResponse> checkLimit(@PathVariable Long id,
+                                                              @PathVariable String key,
+                                                              @RequestParam(required = false) Integer usage) {
+        return ResponseEntity.ok(planLimitResolver.check(id, key, usage));
+    }
+
+    @GetMapping("/{id}/features")
+    @Operation(summary = "Listar features do plano",
+            description = "Retorna a lista estruturada de features do plano (mesmo formato dos limites).")
+    public ResponseEntity<List<PlanLimitDto>> listFeatures(@PathVariable Long id) {
+        return ResponseEntity.ok(planLimitResolver.listFeatures(id));
     }
 
     @GetMapping("/{id}/pricing")

@@ -2,6 +2,7 @@ package br.com.holding.payments.phase8;
 
 import br.com.holding.payments.company.DowngradeValidationStrategy;
 import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanLimitCodec;
 import br.com.holding.payments.planchange.PlanLimitsValidator;
 import br.com.holding.payments.planchange.PlanLimitsValidator.ValidationResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,7 +23,8 @@ class PlanLimitsValidatorTest {
 
     @BeforeEach
     void setUp() {
-        validator = new PlanLimitsValidator(new ObjectMapper());
+        ObjectMapper mapper = new ObjectMapper();
+        validator = new PlanLimitsValidator(mapper, new PlanLimitCodec(mapper));
     }
 
     private Plan planWithLimits(String limitsJson) {

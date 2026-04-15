@@ -2,6 +2,7 @@ package br.com.holding.payments.plan.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record PlanResponse(
         Long id,
@@ -27,8 +28,8 @@ public record PlanResponse(
         BigDecimal setupFee,
         Boolean active,
         Integer version,
-        String limits,
-        String features,
+        List<PlanLimitDto> limits,
+        List<PlanLimitDto> features,
         Integer tierOrder,
         LocalDateTime createdAt,
         LocalDateTime updatedAt

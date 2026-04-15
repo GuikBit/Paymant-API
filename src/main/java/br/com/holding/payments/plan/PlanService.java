@@ -29,6 +29,7 @@ public class PlanService {
     private final CompanyRepository companyRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final PlanMapper planMapper;
+    private final PlanLimitCodec limitCodec;
 
     private static final BigDecimal ANNUAL_MARGIN_TOLERANCE = new BigDecimal("0.05");
 
@@ -80,8 +81,8 @@ public class PlanService {
                 .promoAnualFim(request.promoAnualFim())
                 .trialDays(request.trialDays() != null ? request.trialDays() : 0)
                 .setupFee(request.setupFee() != null ? request.setupFee() : BigDecimal.ZERO)
-                .limits(request.limits())
-                .features(request.features())
+                .limits(limitCodec.serialize(request.limits()))
+                .features(limitCodec.serialize(request.features()))
                 .tierOrder(request.tierOrder() != null ? request.tierOrder() : 0)
                 .build();
 
@@ -122,8 +123,8 @@ public class PlanService {
         if (request.promoAnualFim() != null) plan.setPromoAnualFim(request.promoAnualFim());
         if (request.trialDays() != null) plan.setTrialDays(request.trialDays());
         if (request.setupFee() != null) plan.setSetupFee(request.setupFee());
-        if (request.limits() != null) plan.setLimits(request.limits());
-        if (request.features() != null) plan.setFeatures(request.features());
+        if (request.limits() != null) plan.setLimits(limitCodec.serialize(request.limits()));
+        if (request.features() != null) plan.setFeatures(limitCodec.serialize(request.features()));
         if (request.tierOrder() != null) plan.setTierOrder(request.tierOrder());
 
         // Re-validate promo mensal if any promo mensal field was updated
@@ -232,8 +233,8 @@ public class PlanService {
                 .promoAnualFim(request.promoAnualFim() != null ? request.promoAnualFim() : original.getPromoAnualFim())
                 .trialDays(request.trialDays() != null ? request.trialDays() : original.getTrialDays())
                 .setupFee(request.setupFee() != null ? request.setupFee() : original.getSetupFee())
-                .limits(request.limits() != null ? request.limits() : original.getLimits())
-                .features(request.features() != null ? request.features() : original.getFeatures())
+                .limits(request.limits() != null ? limitCodec.serialize(request.limits()) : original.getLimits())
+                .features(request.features() != null ? limitCodec.serialize(request.features()) : original.getFeatures())
                 .tierOrder(request.tierOrder() != null ? request.tierOrder() : original.getTierOrder())
                 .version(nextVersion)
                 .build();
@@ -329,8 +330,8 @@ public class PlanService {
                 plan.getDescontoPercentualAnual(),
                 promoMensal,
                 promoAnual,
-                plan.getFeatures(),
-                plan.getLimits()
+                limitCodec.deserialize(plan.getFeatures()),
+                limitCodec.deserialize(plan.getLimits())
         );
     }
 

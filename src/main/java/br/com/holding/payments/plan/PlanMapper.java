@@ -1,13 +1,17 @@
 package br.com.holding.payments.plan;
 
 import br.com.holding.payments.plan.dto.PlanResponse;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Component
+@RequiredArgsConstructor
 public class PlanMapper {
+
+    private final PlanLimitCodec limitCodec;
 
     public PlanResponse toResponse(Plan plan) {
         BigDecimal precoSemestral;
@@ -41,8 +45,8 @@ public class PlanMapper {
                 plan.getSetupFee(),
                 plan.getActive(),
                 plan.getVersion(),
-                plan.getLimits(),
-                plan.getFeatures(),
+                limitCodec.deserialize(plan.getLimits()),
+                limitCodec.deserialize(plan.getFeatures()),
                 plan.getTierOrder(),
                 plan.getCreatedAt(),
                 plan.getUpdatedAt()

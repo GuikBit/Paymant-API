@@ -2,6 +2,7 @@ package br.com.holding.payments.planchange;
 
 import br.com.holding.payments.company.DowngradeValidationStrategy;
 import br.com.holding.payments.plan.Plan;
+import br.com.holding.payments.plan.PlanLimitCodec;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +27,7 @@ import java.util.Map;
 public class PlanLimitsValidator {
 
     private final ObjectMapper objectMapper;
+    private final PlanLimitCodec limitCodec;
 
     public ValidationResult validate(Plan targetPlan, Map<String, Integer> currentUsage,
                                      DowngradeValidationStrategy strategy) {
@@ -64,6 +66,10 @@ public class PlanLimitsValidator {
             return Collections.emptyMap();
         }
         try {
+            Map<String, Integer> structured = limitCodec.toNumberMap(plan.getLimits());
+            if (!structured.isEmpty()) {
+                return structured;
+            }
             return objectMapper.readValue(plan.getLimits(), new TypeReference<>() {});
         } catch (Exception e) {
             log.warn("Failed to parse plan limits for plan id={}: {}", plan.getId(), e.getMessage());

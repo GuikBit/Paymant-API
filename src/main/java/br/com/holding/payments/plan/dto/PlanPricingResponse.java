@@ -2,6 +2,7 @@ package br.com.holding.payments.plan.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record PlanPricingResponse(
         Long id,
@@ -13,8 +14,8 @@ public record PlanPricingResponse(
         BigDecimal descontoPercentualAnual,
         PromoPricing promoMensal,
         PromoPricing promoAnual,
-        String features,
-        String limits
+        List<PlanLimitDto> features,
+        List<PlanLimitDto> limits
 ) {
 
     public record PromoPricing(

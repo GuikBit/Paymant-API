@@ -1,7 +1,10 @@
 package br.com.holding.payments.plan.dto;
 
+import jakarta.validation.Valid;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record UpdatePlanRequest(
         String name,
@@ -21,7 +24,7 @@ public record UpdatePlanRequest(
         LocalDateTime promoAnualFim,
         Integer trialDays,
         BigDecimal setupFee,
-        String limits,
-        String features,
+        @Valid List<PlanLimitDto> limits,
+        @Valid List<PlanLimitDto> features,
         Integer tierOrder
 ) {}
