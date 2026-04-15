@@ -10,12 +10,13 @@ public record CouponValidationResponse(
         String message,
         DiscountType discountType,
         CouponApplicationType applicationType,
+        String applicationDescription,
         BigDecimal percentualDiscount,
         BigDecimal discountAmount,
         BigDecimal originalValue,
         BigDecimal finalValue
 ) {
     public static CouponValidationResponse invalid(String message) {
-        return new CouponValidationResponse(false, message, null, null, null, null, null, null);
+        return new CouponValidationResponse(false, message, null, null, null, null, null, null, null);
     }
 }

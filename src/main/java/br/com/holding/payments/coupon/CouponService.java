@@ -54,17 +54,17 @@ public class CouponService {
         String code = request.code().toUpperCase();
 
         if (couponRepository.existsByCodeAndCompanyId(code, companyId)) {
-            throw new BusinessException("Ja existe um cupom com o codigo '" + code + "' para esta empresa.");
+            throw new BusinessException("Já existe um cupom com o código '" + code + "' para esta empresa.");
         }
 
         if (request.discountType() == DiscountType.PERCENTAGE
                 && request.discountValue().compareTo(MAX_PERCENTAGE_DISCOUNT) > 0) {
-            throw new BusinessException("Desconto percentual nao pode ser maior que 90%.");
+            throw new BusinessException("Desconto percentual não pode ser maior que 90%.");
         }
 
         if (request.validFrom() != null && request.validUntil() != null
                 && !request.validUntil().isAfter(request.validFrom())) {
-            throw new BusinessException("Data de validade final deve ser posterior a data de inicio.");
+            throw new BusinessException("Data de validade final deve ser posterior à data de início.");
         }
 
         CouponApplicationType applicationType = request.applicationType() != null
@@ -115,7 +115,7 @@ public class CouponService {
     public CouponResponse findByCode(String code) {
         Long companyId = TenantContext.getRequiredCompanyId();
         Coupon coupon = couponRepository.findByCodeAndCompanyId(code.toUpperCase(), companyId)
-                .orElseThrow(() -> new BusinessException("Cupom com codigo '" + code + "' nao encontrado."));
+                .orElseThrow(() -> new BusinessException("Cupom com código '" + code + "' não encontrado."));
         return couponMapper.toResponse(coupon);
     }
 
@@ -151,12 +151,12 @@ public class CouponService {
         // Re-validate discount rules after applying changes
         if (coupon.getDiscountType() == DiscountType.PERCENTAGE
                 && coupon.getDiscountValue().compareTo(MAX_PERCENTAGE_DISCOUNT) > 0) {
-            throw new BusinessException("Desconto percentual nao pode ser maior que 90%.");
+            throw new BusinessException("Desconto percentual não pode ser maior que 90%.");
         }
 
         if (coupon.getValidFrom() != null && coupon.getValidUntil() != null
                 && !coupon.getValidUntil().isAfter(coupon.getValidFrom())) {
-            throw new BusinessException("Data de validade final deve ser posterior a data de inicio.");
+            throw new BusinessException("Data de validade final deve ser posterior à data de início.");
         }
 
         coupon = couponRepository.save(coupon);
@@ -198,28 +198,28 @@ public class CouponService {
 
         // Check 1: Exists, active, not deleted
         if (coupon == null || !Boolean.TRUE.equals(coupon.getActive()) || coupon.isDeleted()) {
-            return CouponValidationResponse.invalid("Cupom nao encontrado ou inativo.");
+            return CouponValidationResponse.invalid("Cupom não encontrado ou inativo.");
         }
 
         // Check 2: Within period
         if (!coupon.isWithinPeriod()) {
-            return CouponValidationResponse.invalid("Cupom esta fora do periodo de validade.");
+            return CouponValidationResponse.invalid("Cupom está fora do período de validade.");
         }
 
         // Check 3: Global limit
         if (coupon.hasReachedGlobalLimit()) {
-            return CouponValidationResponse.invalid("Cupom atingiu o limite maximo de utilizacoes.");
+            return CouponValidationResponse.invalid("Cupom atingiu o limite máximo de utilizações.");
         }
 
         // Check 5: Scope matches
         if (request.scope() != coupon.getScope()) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para este tipo de operacao.");
+            return CouponValidationResponse.invalid("Cupom não é válido para este tipo de operação.");
         }
 
         // Check 6: Plan allowed
         if (coupon.getScope() == CouponScope.SUBSCRIPTION && coupon.getAllowedPlans() != null
                 && request.planCode() != null && !isPlanAllowed(coupon.getAllowedPlans(), request.planCode())) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para o plano selecionado.");
+            return CouponValidationResponse.invalid("Cupom não é válido para o plano selecionado.");
         }
 
         // Check 8: Cycle matches
@@ -227,7 +227,7 @@ public class CouponService {
                 && blankToNull(coupon.getAllowedCycle()) != null
                 && request.cycle() != null
                 && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para o ciclo de cobranca selecionado.");
+            return CouponValidationResponse.invalid("Cupom não é válido para o ciclo de cobrança selecionado.");
         }
 
         BigDecimal effectiveValue = resolveValue(request, coupon.getCompany().getId());
@@ -237,9 +237,10 @@ public class CouponService {
 
         return new CouponValidationResponse(
                 true,
-                "Cupom valido.",
+                "Cupom válido.",
                 coupon.getDiscountType(),
                 coupon.getApplicationType(),
+                describeApplication(coupon),
                 coupon.getDiscountType() == DiscountType.PERCENTAGE ? coupon.getDiscountValue() : null,
                 null,
                 null,
@@ -255,42 +256,42 @@ public class CouponService {
 
         // Check 1: Exists, active, not deleted
         if (coupon == null || !Boolean.TRUE.equals(coupon.getActive()) || coupon.isDeleted()) {
-            return CouponValidationResponse.invalid("Cupom nao encontrado ou inativo.");
+            return CouponValidationResponse.invalid("Cupom não encontrado ou inativo.");
         }
 
         // Check 2: Within period
         if (!coupon.isWithinPeriod()) {
-            return CouponValidationResponse.invalid("Cupom esta fora do periodo de validade.");
+            return CouponValidationResponse.invalid("Cupom está fora do período de validade.");
         }
 
         // Check 3: Global limit
         if (coupon.hasReachedGlobalLimit()) {
-            return CouponValidationResponse.invalid("Cupom atingiu o limite maximo de utilizacoes.");
+            return CouponValidationResponse.invalid("Cupom atingiu o limite máximo de utilizações.");
         }
 
         // Check 4: Per-customer limit
         if (request.customerId() != null && coupon.getMaxUsesPerCustomer() != null) {
             long customerUsages = couponUsageRepository.countByCouponIdAndCustomerId(coupon.getId(), request.customerId());
             if (customerUsages >= coupon.getMaxUsesPerCustomer()) {
-                return CouponValidationResponse.invalid("Cupom ja foi utilizado o numero maximo de vezes para este cliente.");
+                return CouponValidationResponse.invalid("Cupom já foi utilizado o número máximo de vezes para este cliente.");
             }
         }
 
         // Check 5: Scope matches
         if (request.scope() != coupon.getScope()) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para este tipo de operacao.");
+            return CouponValidationResponse.invalid("Cupom não é válido para este tipo de operação.");
         }
 
         // Check 6: Plan allowed
         if (coupon.getScope() == CouponScope.SUBSCRIPTION && coupon.getAllowedPlans() != null
                 && request.planCode() != null && !isPlanAllowed(coupon.getAllowedPlans(), request.planCode())) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para o plano selecionado.");
+            return CouponValidationResponse.invalid("Cupom não é válido para o plano selecionado.");
         }
 
         // Check 7: Customer allowed
         if (coupon.getAllowedCustomers() != null && request.customerId() != null
                 && !isCustomerAllowed(coupon.getAllowedCustomers(), request.customerId())) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para este cliente.");
+            return CouponValidationResponse.invalid("Cupom não é válido para este cliente.");
         }
 
         // Check 8: Cycle matches
@@ -298,7 +299,7 @@ public class CouponService {
                 && blankToNull(coupon.getAllowedCycle()) != null
                 && request.cycle() != null
                 && !coupon.getAllowedCycle().equalsIgnoreCase(request.cycle())) {
-            return CouponValidationResponse.invalid("Cupom nao e valido para o ciclo de cobranca selecionado.");
+            return CouponValidationResponse.invalid("Cupom não é válido para o ciclo de cobrança selecionado.");
         }
 
         BigDecimal effectiveValue = resolveValue(request, coupon.getCompany().getId());
@@ -308,9 +309,10 @@ public class CouponService {
 
         return new CouponValidationResponse(
                 true,
-                "Cupom valido.",
+                "Cupom válido.",
                 coupon.getDiscountType(),
                 coupon.getApplicationType(),
+                describeApplication(coupon),
                 coupon.getDiscountType() == DiscountType.PERCENTAGE ? coupon.getDiscountValue() : null,
                 null,
                 null,
@@ -341,7 +343,7 @@ public class CouponService {
         // Increment usage count atomically (reserve the slot)
         int updated = couponRepository.incrementUsageCount(coupon.getId());
         if (updated == 0) {
-            throw new BusinessException("Cupom atingiu o limite maximo de utilizacoes.");
+            throw new BusinessException("Cupom atingiu o limite máximo de utilizações.");
         }
 
         return CouponCalculator.calculate(coupon.getDiscountType(), coupon.getDiscountValue(), effectivePrice);
@@ -387,7 +389,7 @@ public class CouponService {
 
         Long companyId = TenantContext.getRequiredCompanyId();
         Coupon coupon = couponRepository.findByCodeAndCompanyId(couponCode.toUpperCase(), companyId)
-                .orElseThrow(() -> new BusinessException("Cupom com codigo '" + couponCode + "' nao encontrado."));
+                .orElseThrow(() -> new BusinessException("Cupom com código '" + couponCode + "' não encontrado."));
 
         // Validate (checks 1-5, 7 - no plan or cycle checks for charges)
         ValidateCouponRequest validateRequest = new ValidateCouponRequest(
@@ -400,13 +402,13 @@ public class CouponService {
         // Check customer hasn't used this coupon for a charge before
         long chargeUsages = couponUsageRepository.countChargeUsagesByCustomer(coupon.getId(), customerId);
         if (chargeUsages > 0) {
-            throw new BusinessException("Cliente ja utilizou este cupom em uma cobranca.");
+            throw new BusinessException("Cliente já utilizou este cupom em uma cobrança.");
         }
 
         // Increment usage count atomically (reserve the slot)
         int updated = couponRepository.incrementUsageCount(coupon.getId());
         if (updated == 0) {
-            throw new BusinessException("Cupom atingiu o limite maximo de utilizacoes.");
+            throw new BusinessException("Cupom atingiu o limite máximo de utilizações.");
         }
 
         return CouponCalculator.calculate(coupon.getDiscountType(), coupon.getDiscountValue(), chargeValue);
@@ -420,7 +422,7 @@ public class CouponService {
                                    BigDecimal originalValue, CouponCalculator.CouponDiscountResult result) {
         Long companyId = TenantContext.getRequiredCompanyId();
         Coupon coupon = couponRepository.findByCodeAndCompanyId(couponCode.toUpperCase(), companyId)
-                .orElseThrow(() -> new BusinessException("Cupom com codigo '" + couponCode + "' nao encontrado."));
+                .orElseThrow(() -> new BusinessException("Cupom com código '" + couponCode + "' não encontrado."));
         Customer customer = customerRepository.getReferenceById(customerId);
         Company company = companyRepository.getReferenceById(companyId);
 
@@ -489,9 +491,9 @@ public class CouponService {
     public Coupon findActiveEntityByCode(String code) {
         Long companyId = TenantContext.getRequiredCompanyId();
         Coupon coupon = couponRepository.findByCodeAndCompanyId(code.toUpperCase(), companyId)
-                .orElseThrow(() -> new BusinessException("Cupom com codigo '" + code + "' nao encontrado."));
+                .orElseThrow(() -> new BusinessException("Cupom com código '" + code + "' não encontrado."));
         if (!Boolean.TRUE.equals(coupon.getActive()) || coupon.isDeleted()) {
-            throw new BusinessException("Cupom '" + code + "' esta inativo ou foi removido.");
+            throw new BusinessException("Cupom '" + code + "' está inativo ou foi removido.");
         }
         return coupon;
     }
@@ -518,14 +520,32 @@ public class CouponService {
 
         return new CouponValidationResponse(
                 true,
-                "Cupom valido.",
+                "Cupom válido.",
                 coupon.getDiscountType(),
                 coupon.getApplicationType(),
+                describeApplication(coupon),
                 percentualDiscount,
                 result.discountAmount(),
                 originalValue,
                 result.finalValue()
         );
+    }
+
+    /**
+     * Monta a descrição legível do tipo de aplicação do cupom.
+     *  - FIRST_CHARGE: válido apenas na primeira cobrança.
+     *  - RECURRING + recurrenceMonths preenchido: válido nas N primeiras cobranças.
+     *  - RECURRING + recurrenceMonths null: válido enquanto o cupom estiver vigente (permanente).
+     */
+    private String describeApplication(Coupon coupon) {
+        if (coupon.getApplicationType() == CouponApplicationType.FIRST_CHARGE) {
+            return "Cupom válido somente na primeira cobrança!";
+        }
+        Integer months = coupon.getRecurrenceMonths();
+        if (months != null && months > 0) {
+            return "Cupom válido nas " + months + " primeiras cobranças!";
+        }
+        return "Desconto válido enquanto o cupom estiver vigente!";
     }
 
     private boolean isPlanAllowed(String allowedPlansJson, String planCode) {
