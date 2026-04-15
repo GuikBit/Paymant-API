@@ -3,7 +3,7 @@ package br.com.holding.payments.plan.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -15,7 +15,7 @@ public record CreatePlanRequest(
         @Pattern(regexp = "^[a-z][a-z0-9-]*$", message = "Codigo deve conter apenas letras minusculas, numeros e hifen, iniciando com letra")
         String codigo,
         @NotNull(message = "Preco mensal e obrigatorio")
-        @Positive(message = "Preco mensal deve ser positivo")
+        @PositiveOrZero(message = "Preco mensal nao pode ser negativo")
         BigDecimal precoMensal,
         BigDecimal precoAnual,
         BigDecimal descontoPercentualAnual,
