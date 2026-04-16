@@ -31,6 +31,7 @@ public record PlanResponse(
         List<PlanLimitDto> limits,
         List<PlanLimitDto> features,
         Integer tierOrder,
+        Boolean isFree,
         LocalDateTime createdAt,
         LocalDateTime updatedAt
 ) {}

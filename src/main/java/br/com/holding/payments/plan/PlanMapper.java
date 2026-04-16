@@ -48,6 +48,7 @@ public class PlanMapper {
                 limitCodec.deserialize(plan.getLimits()),
                 limitCodec.deserialize(plan.getFeatures()),
                 plan.getTierOrder(),
+                plan.getIsFree(),
                 plan.getCreatedAt(),
                 plan.getUpdatedAt()
         );

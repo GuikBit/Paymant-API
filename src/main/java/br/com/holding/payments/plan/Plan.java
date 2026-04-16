@@ -96,6 +96,10 @@ public class Plan {
     private Boolean active = true;
 
     @Builder.Default
+    @Column(name = "is_free", nullable = false)
+    private Boolean isFree = false;
+
+    @Builder.Default
     @Column(nullable = false)
     private Integer version = 1;
 

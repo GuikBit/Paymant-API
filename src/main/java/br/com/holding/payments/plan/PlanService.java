@@ -43,23 +43,36 @@ public class PlanService {
             throw new BusinessException("Ja existe um plano com o codigo '" + request.codigo() + "' para esta empresa.");
         }
 
-        validatePromoMensal(
+        boolean isFree = Boolean.TRUE.equals(request.isFree());
+        validateFreePlanConsistency(
+                isFree,
+                request.precoMensal(),
+                request.precoAnual(),
                 request.promoMensalAtiva(),
-                request.promoMensalPreco(),
-                request.promoMensalInicio(),
-                request.promoMensalFim(),
-                request.precoMensal()
-        );
-
-        validatePromoAnual(
                 request.promoAnualAtiva(),
-                request.promoAnualPreco(),
-                request.promoAnualInicio(),
-                request.promoAnualFim(),
-                request.precoAnual()
+                request.trialDays(),
+                request.setupFee()
         );
 
-        validatePrecoAnualMargin(request.precoMensal(), request.precoAnual(), request.descontoPercentualAnual());
+        if (!isFree) {
+            validatePromoMensal(
+                    request.promoMensalAtiva(),
+                    request.promoMensalPreco(),
+                    request.promoMensalInicio(),
+                    request.promoMensalFim(),
+                    request.precoMensal()
+            );
+
+            validatePromoAnual(
+                    request.promoAnualAtiva(),
+                    request.promoAnualPreco(),
+                    request.promoAnualInicio(),
+                    request.promoAnualFim(),
+                    request.precoAnual()
+            );
+
+            validatePrecoAnualMargin(request.precoMensal(), request.precoAnual(), request.descontoPercentualAnual());
+        }
 
         Plan plan = Plan.builder()
                 .company(company)
@@ -84,10 +97,12 @@ public class PlanService {
                 .limits(limitCodec.serialize(request.limits()))
                 .features(limitCodec.serialize(request.features()))
                 .tierOrder(request.tierOrder() != null ? request.tierOrder() : 0)
+                .isFree(isFree)
                 .build();
 
         plan = planRepository.save(plan);
-        log.info("Plan created: id={}, codigo={}, precoMensal={}", plan.getId(), plan.getCodigo(), plan.getPrecoMensal());
+        log.info("Plan created: id={}, codigo={}, precoMensal={}, isFree={}",
+                plan.getId(), plan.getCodigo(), plan.getPrecoMensal(), plan.getIsFree());
         return planMapper.toResponse(plan);
     }
 
@@ -105,6 +120,12 @@ public class PlanService {
     @Auditable(action = "PLAN_UPDATE", entity = "Plan")
     public PlanResponse update(Long id, UpdatePlanRequest request) {
         Plan plan = getPlanOrThrow(id);
+
+        if (request.isFree() != null && !request.isFree().equals(plan.getIsFree())) {
+            throw new BusinessException(
+                    "Nao e possivel alterar a flag isFree de um plano existente. " +
+                    "Crie uma nova versao do plano (cloneForNewVersion) ou um novo plano.");
+        }
 
         if (request.name() != null) plan.setName(request.name());
         if (request.description() != null) plan.setDescription(request.description());
@@ -127,33 +148,45 @@ public class PlanService {
         if (request.features() != null) plan.setFeatures(limitCodec.serialize(request.features()));
         if (request.tierOrder() != null) plan.setTierOrder(request.tierOrder());
 
-        // Re-validate promo mensal if any promo mensal field was updated
-        Boolean promoMensalAtiva = plan.getPromoMensalAtiva();
-        if (Boolean.TRUE.equals(promoMensalAtiva)) {
-            validatePromoMensal(
-                    promoMensalAtiva,
-                    plan.getPromoMensalPreco(),
-                    plan.getPromoMensalInicio(),
-                    plan.getPromoMensalFim(),
-                    plan.getPrecoMensal()
+        if (Boolean.TRUE.equals(plan.getIsFree())) {
+            validateFreePlanConsistency(
+                    true,
+                    plan.getPrecoMensal(),
+                    plan.getPrecoAnual(),
+                    plan.getPromoMensalAtiva(),
+                    plan.getPromoAnualAtiva(),
+                    plan.getTrialDays(),
+                    plan.getSetupFee()
             );
-        }
+        } else {
+            // Re-validate promo mensal if any promo mensal field was updated
+            Boolean promoMensalAtiva = plan.getPromoMensalAtiva();
+            if (Boolean.TRUE.equals(promoMensalAtiva)) {
+                validatePromoMensal(
+                        promoMensalAtiva,
+                        plan.getPromoMensalPreco(),
+                        plan.getPromoMensalInicio(),
+                        plan.getPromoMensalFim(),
+                        plan.getPrecoMensal()
+                );
+            }
 
-        // Re-validate promo anual if any promo anual field was updated
-        Boolean promoAnualAtiva = plan.getPromoAnualAtiva();
-        if (Boolean.TRUE.equals(promoAnualAtiva)) {
-            validatePromoAnual(
-                    promoAnualAtiva,
-                    plan.getPromoAnualPreco(),
-                    plan.getPromoAnualInicio(),
-                    plan.getPromoAnualFim(),
-                    plan.getPrecoAnual()
-            );
-        }
+            // Re-validate promo anual if any promo anual field was updated
+            Boolean promoAnualAtiva = plan.getPromoAnualAtiva();
+            if (Boolean.TRUE.equals(promoAnualAtiva)) {
+                validatePromoAnual(
+                        promoAnualAtiva,
+                        plan.getPromoAnualPreco(),
+                        plan.getPromoAnualInicio(),
+                        plan.getPromoAnualFim(),
+                        plan.getPrecoAnual()
+                );
+            }
 
-        // Re-validate annual price margin if pricing fields were updated
-        if (request.precoMensal() != null || request.precoAnual() != null || request.descontoPercentualAnual() != null) {
-            validatePrecoAnualMargin(plan.getPrecoMensal(), plan.getPrecoAnual(), plan.getDescontoPercentualAnual());
+            // Re-validate annual price margin if pricing fields were updated
+            if (request.precoMensal() != null || request.precoAnual() != null || request.descontoPercentualAnual() != null) {
+                validatePrecoAnualMargin(plan.getPrecoMensal(), plan.getPrecoAnual(), plan.getDescontoPercentualAnual());
+            }
         }
 
         plan = planRepository.save(plan);
@@ -236,6 +269,7 @@ public class PlanService {
                 .limits(request.limits() != null ? limitCodec.serialize(request.limits()) : original.getLimits())
                 .features(request.features() != null ? limitCodec.serialize(request.features()) : original.getFeatures())
                 .tierOrder(request.tierOrder() != null ? request.tierOrder() : original.getTierOrder())
+                .isFree(request.isFree() != null ? request.isFree() : original.getIsFree())
                 .version(nextVersion)
                 .build();
 
@@ -249,6 +283,10 @@ public class PlanService {
      * considerando promocoes ativas e descontos percentuais.
      */
     public BigDecimal getEffectivePrice(Plan plan, PlanCycle cycle) {
+        if (Boolean.TRUE.equals(plan.getIsFree())) {
+            return BigDecimal.ZERO.setScale(2, RoundingMode.HALF_EVEN);
+        }
+
         LocalDateTime now = LocalDateTime.now();
 
         switch (cycle) {
@@ -343,6 +381,33 @@ public class PlanService {
         }
         LocalDateTime now = LocalDateTime.now();
         return !now.isBefore(inicio) && !now.isAfter(fim);
+    }
+
+    private void validateFreePlanConsistency(boolean isFree,
+                                              BigDecimal precoMensal,
+                                              BigDecimal precoAnual,
+                                              Boolean promoMensalAtiva,
+                                              Boolean promoAnualAtiva,
+                                              Integer trialDays,
+                                              BigDecimal setupFee) {
+        if (!isFree) {
+            return;
+        }
+        if (precoMensal != null && precoMensal.compareTo(BigDecimal.ZERO) != 0) {
+            throw new BusinessException("Plano gratuito deve ter precoMensal igual a 0.");
+        }
+        if (precoAnual != null && precoAnual.compareTo(BigDecimal.ZERO) != 0) {
+            throw new BusinessException("Plano gratuito deve ter precoAnual igual a 0 ou nulo.");
+        }
+        if (Boolean.TRUE.equals(promoMensalAtiva) || Boolean.TRUE.equals(promoAnualAtiva)) {
+            throw new BusinessException("Plano gratuito nao pode ter promocoes ativas.");
+        }
+        if (trialDays != null && trialDays > 0) {
+            throw new BusinessException("Plano gratuito nao pode ter trialDays > 0.");
+        }
+        if (setupFee != null && setupFee.compareTo(BigDecimal.ZERO) != 0) {
+            throw new BusinessException("Plano gratuito nao pode ter setupFee.");
+        }
     }
 
     private void validatePromoMensal(Boolean ativa, BigDecimal preco, LocalDateTime inicio, LocalDateTime fim, BigDecimal precoMensal) {

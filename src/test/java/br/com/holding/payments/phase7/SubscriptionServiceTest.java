@@ -159,6 +159,81 @@ class SubscriptionServiceTest {
                     .isInstanceOf(BusinessException.class)
                     .hasMessageContaining("inativo");
         }
+
+        @Test
+        @DisplayName("Plano gratuito: cria subscription local sem chamar Asaas")
+        void subscribe_freePlan_shouldSkipAsaas() {
+            Plan freePlan = Plan.builder()
+                    .company(company).name("Gratuito").codigo("plan-free")
+                    .precoMensal(BigDecimal.ZERO).isFree(true).active(true).build();
+            freePlan.setId(21L);
+
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(customerRepository.findById(10L)).thenReturn(Optional.of(customer));
+            when(planRepository.findById(21L)).thenReturn(Optional.of(freePlan));
+            when(planService.getEffectivePrice(freePlan, PlanCycle.MONTHLY)).thenReturn(BigDecimal.ZERO);
+            when(subscriptionRepository.save(any(Subscription.class))).thenAnswer(inv -> {
+                Subscription s = inv.getArgument(0);
+                s.setId(1L);
+                return s;
+            });
+            when(subscriptionMapper.toResponse(any())).thenReturn(dummyResponse(SubscriptionStatus.ACTIVE));
+
+            CreateSubscriptionRequest request = new CreateSubscriptionRequest(
+                    10L, 21L, BillingType.UNDEFINED, PlanCycle.MONTHLY, null, null, null,
+                    null, null, null, null, null);
+
+            SubscriptionResponse result = subscriptionService.subscribe(request);
+
+            assertThat(result).isNotNull();
+            verify(asaasGateway, never()).createSubscription(anyLong(), any());
+            verify(asaasGateway, never()).listSubscriptionPayments(anyLong(), anyString());
+            verify(outboxPublisher).publish(eq("SubscriptionCreatedEvent"), eq("Subscription"), eq("1"), any());
+        }
+
+        @Test
+        @DisplayName("Plano gratuito com cupom lanca BusinessException")
+        void subscribe_freePlanWithCoupon_shouldThrow() {
+            Plan freePlan = Plan.builder()
+                    .company(company).name("Gratuito").codigo("plan-free")
+                    .precoMensal(BigDecimal.ZERO).isFree(true).active(true).build();
+            freePlan.setId(21L);
+
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(customerRepository.findById(10L)).thenReturn(Optional.of(customer));
+            when(planRepository.findById(21L)).thenReturn(Optional.of(freePlan));
+            when(planService.getEffectivePrice(freePlan, PlanCycle.MONTHLY)).thenReturn(BigDecimal.ZERO);
+
+            CreateSubscriptionRequest request = new CreateSubscriptionRequest(
+                    10L, 21L, BillingType.UNDEFINED, PlanCycle.MONTHLY, null, null, null,
+                    null, null, null, null, "BLACKFRIDAY");
+
+            assertThatThrownBy(() -> subscriptionService.subscribe(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("Cupom");
+        }
+
+        @Test
+        @DisplayName("Plano gratuito com creditCard lanca BusinessException")
+        void subscribe_freePlanWithCard_shouldThrow() {
+            Plan freePlan = Plan.builder()
+                    .company(company).name("Gratuito").codigo("plan-free")
+                    .precoMensal(BigDecimal.ZERO).isFree(true).active(true).build();
+            freePlan.setId(21L);
+
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(customerRepository.findById(10L)).thenReturn(Optional.of(customer));
+            when(planRepository.findById(21L)).thenReturn(Optional.of(freePlan));
+            when(planService.getEffectivePrice(freePlan, PlanCycle.MONTHLY)).thenReturn(BigDecimal.ZERO);
+
+            CreateSubscriptionRequest request = new CreateSubscriptionRequest(
+                    10L, 21L, BillingType.UNDEFINED, PlanCycle.MONTHLY, null, null, null,
+                    null, null, "tok_cc_fake", null, null);
+
+            assertThatThrownBy(() -> subscriptionService.subscribe(request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("cartao");
+        }
     }
 
     @Nested

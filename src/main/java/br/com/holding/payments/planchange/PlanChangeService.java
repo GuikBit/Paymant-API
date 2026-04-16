@@ -12,6 +12,11 @@ import br.com.holding.payments.company.DowngradeValidationStrategy;
 import br.com.holding.payments.creditledger.CreditLedgerOrigin;
 import br.com.holding.payments.creditledger.CustomerCreditLedger;
 import br.com.holding.payments.creditledger.CustomerCreditLedgerService;
+import br.com.holding.payments.customer.Customer;
+import br.com.holding.payments.integration.asaas.gateway.AsaasGatewayService;
+import br.com.holding.payments.integration.asaas.gateway.AsaasPaymentData;
+import br.com.holding.payments.integration.asaas.gateway.AsaasSubscriptionData;
+import br.com.holding.payments.integration.asaas.gateway.AsaasSubscriptionResult;
 import br.com.holding.payments.outbox.OutboxPublisher;
 import br.com.holding.payments.plan.Plan;
 import br.com.holding.payments.plan.PlanCycle;
@@ -23,6 +28,7 @@ import br.com.holding.payments.planchange.dto.RequestPlanChangeRequest;
 import br.com.holding.payments.subscription.Subscription;
 import br.com.holding.payments.subscription.SubscriptionRepository;
 import br.com.holding.payments.subscription.SubscriptionStatus;
+import br.com.holding.payments.subscription.dto.CreateSubscriptionRequest;
 import br.com.holding.payments.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,6 +58,7 @@ public class PlanChangeService {
     private final OutboxPublisher outboxPublisher;
     private final PlanChangeMapper planChangeMapper;
     private final PlanService planService;
+    private final AsaasGatewayService asaasGateway;
 
     @Transactional(readOnly = true)
     public PlanChangePreviewResponse previewChange(Long subscriptionId, Long newPlanId) {
@@ -67,6 +74,39 @@ public class PlanChangeService {
 
         Company company = subscription.getCompany();
         PlanChangePolicy policy = mapPolicy(company.getPlanChangePolicy());
+
+        boolean fromFreeToPaid = Boolean.TRUE.equals(currentPlan.getIsFree()) && !Boolean.TRUE.equals(newPlan.getIsFree());
+        boolean fromPaidToFree = !Boolean.TRUE.equals(currentPlan.getIsFree()) && Boolean.TRUE.equals(newPlan.getIsFree());
+
+        // Free -> Paid: cria assinatura no Asaas agora (sem prorata, sem trial).
+        // A primeira cobranca ja nasce do Asaas. Delta = novo valor cheio (UPGRADE).
+        if (fromFreeToPaid) {
+            return new PlanChangePreviewResponse(
+                    subscriptionId,
+                    currentPlan.getId(), currentPlan.getName(), currentEffectivePrice,
+                    newPlan.getId(), newPlan.getName(), newEffectivePrice,
+                    PlanChangeType.UPGRADE,
+                    PlanChangePolicy.IMMEDIATE_NO_PRORATA,
+                    newEffectivePrice,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO
+            );
+        }
+
+        // Paid -> Free: aguarda fim do ciclo (o cliente ja pagou o periodo corrente).
+        // Sem credito pro-rata: o downgrade e respeitado so ao fim do periodo ja pago.
+        if (fromPaidToFree) {
+            return new PlanChangePreviewResponse(
+                    subscriptionId,
+                    currentPlan.getId(), currentPlan.getName(), currentEffectivePrice,
+                    newPlan.getId(), newPlan.getName(), newEffectivePrice,
+                    PlanChangeType.DOWNGRADE,
+                    PlanChangePolicy.END_OF_CYCLE,
+                    newEffectivePrice.subtract(currentEffectivePrice),
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO
+            );
+        }
 
         LocalDate periodStart = subscription.getCurrentPeriodStart() != null
                 ? subscription.getCurrentPeriodStart().toLocalDate() : subscription.getCreatedAt().toLocalDate();
@@ -121,6 +161,79 @@ public class PlanChangeService {
                 });
 
         Company company = subscription.getCompany();
+        Long companyId = TenantContext.getRequiredCompanyId();
+
+        boolean fromFreeToPaid = Boolean.TRUE.equals(currentPlan.getIsFree()) && !Boolean.TRUE.equals(newPlan.getIsFree());
+        boolean fromPaidToFree = !Boolean.TRUE.equals(currentPlan.getIsFree()) && Boolean.TRUE.equals(newPlan.getIsFree());
+
+        // ============================================================
+        // CASO ESPECIAL: Plano gratuito -> plano pago
+        // Cria a subscription no Asaas agora com nextDueDate = D+1,
+        // sem trial, sem prorata, sem charge avulso.
+        // ============================================================
+        if (fromFreeToPaid) {
+            validatePromoteFromFreeInputs(request);
+
+            SubscriptionPlanChange planChange = SubscriptionPlanChange.builder()
+                    .company(companyRepository.getReferenceById(companyId))
+                    .subscription(subscription)
+                    .previousPlan(currentPlan)
+                    .requestedPlan(newPlan)
+                    .previousCycle(currentCycle)
+                    .requestedCycle(currentCycle)
+                    .changeType(PlanChangeType.UPGRADE)
+                    .policy(PlanChangePolicy.IMMEDIATE_NO_PRORATA)
+                    .deltaAmount(newEffectivePrice)
+                    .prorationCredit(BigDecimal.ZERO)
+                    .prorationCharge(BigDecimal.ZERO)
+                    .requestedBy(request.requestedBy())
+                    .build();
+
+            planChange = planChangeRepository.save(planChange);
+            promoteFromFree(planChange, subscription, newPlan, currentCycle, newEffectivePrice, request, companyId);
+            return planChangeMapper.toResponse(planChange);
+        }
+
+        // ============================================================
+        // CASO ESPECIAL: Plano pago -> plano gratuito
+        // Sempre END_OF_CYCLE: cliente usufrui o periodo ja pago, e no
+        // fim do ciclo cancelamos a subscription no Asaas e trocamos
+        // para o plano free. Historico do cliente no Asaas e preservado.
+        // ============================================================
+        if (fromPaidToFree) {
+            LocalDate endOfCycle = subscription.getNextDueDate() != null
+                    ? subscription.getNextDueDate()
+                    : LocalDate.now().plusMonths(1);
+
+            SubscriptionPlanChange planChange = SubscriptionPlanChange.builder()
+                    .company(companyRepository.getReferenceById(companyId))
+                    .subscription(subscription)
+                    .previousPlan(currentPlan)
+                    .requestedPlan(newPlan)
+                    .previousCycle(currentCycle)
+                    .requestedCycle(currentCycle)
+                    .changeType(PlanChangeType.DOWNGRADE)
+                    .policy(PlanChangePolicy.END_OF_CYCLE)
+                    .deltaAmount(newEffectivePrice.subtract(currentEffectivePrice))
+                    .prorationCredit(BigDecimal.ZERO)
+                    .prorationCharge(BigDecimal.ZERO)
+                    .requestedBy(request.requestedBy())
+                    .build();
+            planChange.transitionTo(PlanChangeStatus.SCHEDULED);
+            planChange.setScheduledFor(endOfCycle.atStartOfDay());
+            planChange = planChangeRepository.save(planChange);
+
+            outboxPublisher.publish("PlanChangeScheduledEvent", "SubscriptionPlanChange",
+                    planChange.getId().toString(), planChangeMapper.toResponse(planChange));
+
+            log.info("Plan change (paid->free) scheduled: id={}, subscriptionId={}, scheduledFor={}",
+                    planChange.getId(), subscriptionId, endOfCycle);
+            return planChangeMapper.toResponse(planChange);
+        }
+
+        // ============================================================
+        // Fluxo padrao: troca entre planos pagos
+        // ============================================================
         PlanChangePolicy policy = mapPolicy(company.getPlanChangePolicy());
 
         // Calculate proration
@@ -158,8 +271,6 @@ public class PlanChangeService {
                 }
             }
         }
-
-        Long companyId = TenantContext.getRequiredCompanyId();
 
         SubscriptionPlanChange planChange = SubscriptionPlanChange.builder()
                 .company(companyRepository.getReferenceById(companyId))
@@ -256,7 +367,25 @@ public class PlanChangeService {
             try {
                 TenantContext.setCompanyId(planChange.getCompany().getId());
                 Subscription subscription = planChange.getSubscription();
+                Plan previousPlan = planChange.getPreviousPlan();
                 Plan newPlan = planChange.getRequestedPlan();
+
+                boolean toFree = Boolean.TRUE.equals(newPlan.getIsFree());
+                boolean fromPaid = !Boolean.TRUE.equals(previousPlan.getIsFree());
+
+                // Paid -> Free agendado: cancela subscription no Asaas agora.
+                // Isso nao apaga o historico de payments do cliente, apenas encerra
+                // a emissao de novas cobrancas recorrentes.
+                if (toFree && fromPaid && subscription.getAsaasId() != null) {
+                    try {
+                        asaasGateway.cancelSubscription(planChange.getCompany().getId(), subscription.getAsaasId());
+                    } catch (Exception e) {
+                        log.error("Failed to cancel Asaas subscription for paid->free change id={}: {}",
+                                planChange.getId(), e.getMessage(), e);
+                        throw e;
+                    }
+                    subscription.setAsaasId(null);
+                }
 
                 subscription.setPlan(newPlan);
                 subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
@@ -268,8 +397,8 @@ public class PlanChangeService {
                 outboxPublisher.publish("PlanChangedEvent", "SubscriptionPlanChange",
                         planChange.getId().toString(), planChangeMapper.toResponse(planChange));
 
-                log.info("Scheduled plan change applied: id={}, subscription={}",
-                        planChange.getId(), subscription.getId());
+                log.info("Scheduled plan change applied: id={}, subscription={}, previous={}, new={}, toFree={}",
+                        planChange.getId(), subscription.getId(), previousPlan.getName(), newPlan.getName(), toFree);
             } catch (Exception e) {
                 planChange.markFailed("Erro ao processar: " + e.getMessage());
                 planChangeRepository.save(planChange);
@@ -282,6 +411,85 @@ public class PlanChangeService {
     }
 
     // ==================== PRIVATE ====================
+
+    private void validatePromoteFromFreeInputs(RequestPlanChangeRequest request) {
+        if (request.billingType() == null) {
+            throw new BusinessException(
+                    "billingType e obrigatorio ao promover assinatura de plano gratuito para plano pago.");
+        }
+        if (request.billingType() == BillingType.CREDIT_CARD
+                && request.creditCard() == null && request.creditCardToken() == null) {
+            throw new BusinessException(
+                    "Dados de cartao (creditCard ou creditCardToken) sao obrigatorios para billingType=CREDIT_CARD.");
+        }
+    }
+
+    private void promoteFromFree(SubscriptionPlanChange planChange,
+                                  Subscription subscription,
+                                  Plan newPlan,
+                                  PlanCycle cycle,
+                                  BigDecimal newEffectivePrice,
+                                  RequestPlanChangeRequest request,
+                                  Long companyId) {
+        Customer customer = subscription.getCustomer();
+        if (customer.getAsaasId() == null) {
+            throw new BusinessException(
+                    "Cliente nao possui asaas_id. Sincronize com o Asaas antes de promover para plano pago.");
+        }
+
+        AsaasPaymentData.CreditCardData creditCard = null;
+        AsaasPaymentData.CreditCardHolderData holderInfo = null;
+
+        CreateSubscriptionRequest.CreditCardData cc = request.creditCard();
+        if (cc != null) {
+            creditCard = new AsaasPaymentData.CreditCardData(
+                    cc.holderName(), cc.number(), cc.expiryMonth(), cc.expiryYear(), cc.ccv());
+        }
+
+        CreateSubscriptionRequest.CreditCardHolderData holder = request.creditCardHolderInfo();
+        if (holder != null) {
+            holderInfo = new AsaasPaymentData.CreditCardHolderData(
+                    holder.name(), holder.email(), holder.cpfCnpj(),
+                    holder.postalCode(), holder.addressNumber(), holder.phone());
+        }
+
+        // D+1, sem trial (requisito: promocao de free nao recebe 14 dias de graca)
+        LocalDate nextDueDate = LocalDate.now().plusDays(1);
+
+        AsaasSubscriptionData subscriptionData = new AsaasSubscriptionData(
+                customer.getAsaasId(),
+                request.billingType().name(),
+                newEffectivePrice,
+                nextDueDate.toString(),
+                cycle.name(),
+                newPlan.getName(),
+                "plan_change_" + planChange.getId(),
+                creditCard,
+                holderInfo,
+                request.creditCardToken(),
+                request.remoteIp()
+        );
+
+        AsaasSubscriptionResult asaasResult = asaasGateway.createSubscription(companyId, subscriptionData);
+
+        subscription.setAsaasId(asaasResult.asaasId());
+        subscription.setBillingType(request.billingType());
+        subscription.setPlan(newPlan);
+        subscription.setEffectivePrice(newEffectivePrice);
+        subscription.setNextDueDate(nextDueDate);
+        subscription.setCurrentPeriodStart(nextDueDate.atStartOfDay());
+        subscriptionRepository.save(subscription);
+
+        planChange.markEffective();
+        planChangeRepository.save(planChange);
+
+        outboxPublisher.publish("PlanChangedEvent", "SubscriptionPlanChange",
+                planChange.getId().toString(), planChangeMapper.toResponse(planChange));
+
+        log.info("Plan change (free->paid) applied: id={}, subscription={}, asaasId={}, newPlan={}, value={}",
+                planChange.getId(), subscription.getId(), asaasResult.asaasId(),
+                newPlan.getName(), newEffectivePrice);
+    }
 
     private void applyPlanChange(SubscriptionPlanChange planChange,
                                   Subscription subscription, Plan currentPlan, Plan newPlan) {

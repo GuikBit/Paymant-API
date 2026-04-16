@@ -475,9 +475,12 @@ public class CouponService {
         subscription.setCouponDiscountAmount(null);
         subscription.setCouponUsesRemaining(null);
 
-        // Update subscription value in Asaas to full price (effectivePrice)
-        Long companyId = subscription.getCompany().getId();
-        asaasGateway.updateSubscriptionValue(companyId, subscription.getAsaasId(), subscription.getEffectivePrice());
+        // Update subscription value in Asaas to full price (effectivePrice).
+        // Subscriptions de plano gratuito nao existem no Asaas (asaasId=null).
+        if (subscription.getAsaasId() != null) {
+            Long companyId = subscription.getCompany().getId();
+            asaasGateway.updateSubscriptionValue(companyId, subscription.getAsaasId(), subscription.getEffectivePrice());
+        }
 
         subscriptionRepository.save(subscription);
 

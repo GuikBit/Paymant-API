@@ -26,5 +26,6 @@ public record UpdatePlanRequest(
         BigDecimal setupFee,
         @Valid List<PlanLimitDto> limits,
         @Valid List<PlanLimitDto> features,
-        Integer tierOrder
+        Integer tierOrder,
+        Boolean isFree
 ) {}

@@ -27,7 +27,11 @@
       "Bash(export JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\")",
       "Bash(./mvnw clean:*)",
       "Bash(xargs basename:*)",
-      "Bash(./mvnw -q -DskipTests compile)"
+      "Bash(./mvnw -q -DskipTests compile)",
+      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw -q -DskipTests compile)",
+      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw -q test -Dtest='PlanChangeServiceTest,SubscriptionServiceTest')",
+      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw test -Dtest='PlanChangeServiceTest,SubscriptionServiceTest')",
+      "Bash(JAVA_HOME=\"/c/Users/Pluri Sistemas/.jdks/corretto-21.0.7\" ./mvnw test -DfailIfNoTests=false -Dtest='!RlsIsolationTest,!EncryptionTest,!*IntegrationTest')"
     ]
   }
 }

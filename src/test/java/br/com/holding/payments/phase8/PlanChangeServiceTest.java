@@ -65,6 +65,7 @@ class PlanChangeServiceTest {
     @Mock private OutboxPublisher outboxPublisher;
     @Mock private PlanChangeMapper planChangeMapper;
     @Mock private PlanService planService;
+    @Mock private br.com.holding.payments.integration.asaas.gateway.AsaasGatewayService asaasGateway;
 
     @InjectMocks
     private PlanChangeService service;
@@ -312,7 +313,7 @@ class PlanChangeServiceTest {
                             null, null));
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin", null, null, null, null, null);
             PlanChangeResponse response = service.requestChange(1000L, request);
 
             assertThat(response).isNotNull();
@@ -344,7 +345,7 @@ class PlanChangeServiceTest {
                             null, null));
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin", null, null, null, null, null);
             service.requestChange(1000L, request);
 
             // Plano deve ter sido alterado imediatamente
@@ -371,7 +372,7 @@ class PlanChangeServiceTest {
                     .thenReturn(CustomerCreditLedger.builder().id(5L).build());
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Collections.emptyMap(), "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Collections.emptyMap(), "admin", null, null, null, null, null);
             service.requestChange(1000L, request);
 
             verify(creditLedgerService).addCredit(eq(10L), any(BigDecimal.class),
@@ -394,7 +395,7 @@ class PlanChangeServiceTest {
             });
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(400L, null, "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(400L, null, "admin", null, null, null, null, null);
             service.requestChange(1000L, request);
 
             verify(chargeService, never()).createUndefinedCharge(any());
@@ -411,7 +412,7 @@ class PlanChangeServiceTest {
             when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
             when(planChangeRepository.findPendingBySubscriptionId(1000L)).thenReturn(Optional.of(existing));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin", null, null, null, null, null);
 
             assertThatThrownBy(() -> service.requestChange(1000L, request))
                     .isInstanceOf(BusinessException.class)
@@ -433,7 +434,7 @@ class PlanChangeServiceTest {
             });
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(200L, null, "admin", null, null, null, null, null);
             service.requestChange(1000L, request);
 
             // Plano NAO deve ter sido alterado
@@ -451,7 +452,7 @@ class PlanChangeServiceTest {
             when(planLimitsValidator.validate(any(), any(), any()))
                     .thenReturn(PlanLimitsValidator.ValidationResult.blocked(List.of("users excedido")));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Map.of("users", 10), "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Map.of("users", 10), "admin", null, null, null, null, null);
 
             assertThatThrownBy(() -> service.requestChange(1000L, request))
                     .isInstanceOf(BusinessException.class)
@@ -475,7 +476,7 @@ class PlanChangeServiceTest {
             });
             when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
 
-            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Map.of("users", 10), "admin");
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(300L, Map.of("users", 10), "admin", null, null, null, null, null);
             service.requestChange(1000L, request);
 
             // Deve ter agendado ao inves de aplicar imediatamente
@@ -717,6 +718,307 @@ class PlanChangeServiceTest {
 
             assertThat(planChange.getStatus()).isEqualTo(PlanChangeStatus.FAILED);
             assertThat(planChange.getFailureReason()).contains("DB error");
+        }
+    }
+
+    // ==================== FREE <-> PAID ====================
+
+    @Nested
+    @DisplayName("Mudancas envolvendo plano gratuito")
+    class FreePaidTests {
+
+        private Plan freePlan;
+        private Subscription freeSubscription;
+
+        @org.junit.jupiter.api.BeforeEach
+        void setupFree() {
+            freePlan = Plan.builder()
+                    .id(500L)
+                    .name("Gratuito")
+                    .codigo("plan-free")
+                    .precoMensal(BigDecimal.ZERO)
+                    .isFree(true)
+                    .active(true)
+                    .build();
+
+            customer.setAsaasId("cus_free123");
+
+            freeSubscription = Subscription.builder()
+                    .id(2000L)
+                    .company(company)
+                    .customer(customer)
+                    .plan(freePlan)
+                    .asaasId(null)
+                    .billingType(BillingType.UNDEFINED)
+                    .cycle(PlanCycle.MONTHLY)
+                    .effectivePrice(BigDecimal.ZERO)
+                    .status(SubscriptionStatus.ACTIVE)
+                    .currentPeriodStart(LocalDateTime.of(2026, 4, 1, 0, 0))
+                    .nextDueDate(LocalDate.of(2026, 5, 1))
+                    .build();
+
+            lenient().when(planService.getEffectivePrice(freePlan, PlanCycle.MONTHLY))
+                    .thenReturn(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("Preview free->pago: delta=novo valor cheio, policy=IMMEDIATE_NO_PRORATA")
+        void previewFreeToPaid_shouldReturnFullNewValue() {
+            when(subscriptionRepository.findById(2000L)).thenReturn(Optional.of(freeSubscription));
+            when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
+
+            PlanChangePreviewResponse preview = service.previewChange(2000L, 200L);
+
+            assertThat(preview.changeType()).isEqualTo(PlanChangeType.UPGRADE);
+            assertThat(preview.policy()).isEqualTo(
+                    br.com.holding.payments.planchange.PlanChangePolicy.IMMEDIATE_NO_PRORATA);
+            assertThat(preview.delta()).isEqualByComparingTo(new BigDecimal("200.00"));
+            assertThat(preview.prorationCredit()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(preview.prorationCharge()).isEqualByComparingTo(BigDecimal.ZERO);
+        }
+
+        @Test
+        @DisplayName("Preview pago->free: policy=END_OF_CYCLE, sem credito, sem charge")
+        void previewPaidToFree_shouldForceEndOfCycle() {
+            when(subscriptionRepository.findById(1000L)).thenReturn(Optional.of(subscription));
+            when(planRepository.findById(500L)).thenReturn(Optional.of(freePlan));
+
+            PlanChangePreviewResponse preview = service.previewChange(1000L, 500L);
+
+            assertThat(preview.changeType()).isEqualTo(PlanChangeType.DOWNGRADE);
+            assertThat(preview.policy()).isEqualTo(
+                    br.com.holding.payments.planchange.PlanChangePolicy.END_OF_CYCLE);
+            assertThat(preview.prorationCredit()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(preview.prorationCharge()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(preview.delta()).isEqualByComparingTo(new BigDecimal("-100.00"));
+        }
+
+        @Test
+        @DisplayName("requestChange free->pago cria subscription no Asaas com D+1 (sem trial)")
+        void requestFreeToPaid_shouldCreateAsaasSubscription() {
+            when(subscriptionRepository.findById(2000L)).thenReturn(Optional.of(freeSubscription));
+            when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(2000L)).thenReturn(Optional.empty());
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(planChangeRepository.save(any())).thenAnswer(inv -> {
+                SubscriptionPlanChange pc = inv.getArgument(0);
+                if (pc.getId() == null) pc.setId(7L);
+                return pc;
+            });
+            when(asaasGateway.createSubscription(eq(1L), any())).thenReturn(
+                    new br.com.holding.payments.integration.asaas.gateway.AsaasSubscriptionResult(
+                            "sub_asaas_new", "cus_free123", "PIX",
+                            new BigDecimal("200.00"), LocalDate.now().plusDays(1).toString(),
+                            "MONTHLY", "ACTIVE"));
+            when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
+
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(
+                    200L, null, "admin", BillingType.PIX, null, null, null, null);
+
+            PlanChangeResponse response = service.requestChange(2000L, request);
+
+            assertThat(response).isNotNull();
+            verify(asaasGateway).createSubscription(eq(1L), any());
+            verify(chargeService, never()).createUndefinedCharge(any());
+            assertThat(freeSubscription.getAsaasId()).isEqualTo("sub_asaas_new");
+            assertThat(freeSubscription.getPlan()).isEqualTo(upgradePlan);
+            assertThat(freeSubscription.getEffectivePrice()).isEqualByComparingTo(new BigDecimal("200.00"));
+            assertThat(freeSubscription.getNextDueDate()).isEqualTo(LocalDate.now().plusDays(1));
+            assertThat(freeSubscription.getBillingType()).isEqualTo(BillingType.PIX);
+            verify(outboxPublisher).publish(eq("PlanChangedEvent"), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("requestChange free->pago sem billingType lanca BusinessException")
+        void requestFreeToPaid_withoutBillingType_shouldThrow() {
+            when(subscriptionRepository.findById(2000L)).thenReturn(Optional.of(freeSubscription));
+            when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(2000L)).thenReturn(Optional.empty());
+            lenient().when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            lenient().when(planChangeRepository.save(any())).thenAnswer(inv -> {
+                SubscriptionPlanChange pc = inv.getArgument(0);
+                if (pc.getId() == null) pc.setId(7L);
+                return pc;
+            });
+
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(
+                    200L, null, "admin", null, null, null, null, null);
+
+            assertThatThrownBy(() -> service.requestChange(2000L, request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("billingType");
+        }
+
+        @Test
+        @DisplayName("requestChange free->pago com CREDIT_CARD sem dados de cartao lanca BusinessException")
+        void requestFreeToPaid_creditCardWithoutData_shouldThrow() {
+            when(subscriptionRepository.findById(2000L)).thenReturn(Optional.of(freeSubscription));
+            when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(2000L)).thenReturn(Optional.empty());
+            lenient().when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            lenient().when(planChangeRepository.save(any())).thenAnswer(inv -> {
+                SubscriptionPlanChange pc = inv.getArgument(0);
+                if (pc.getId() == null) pc.setId(7L);
+                return pc;
+            });
+
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(
+                    200L, null, "admin", BillingType.CREDIT_CARD, null, null, null, null);
+
+            assertThatThrownBy(() -> service.requestChange(2000L, request))
+                    .isInstanceOf(BusinessException.class)
+                    .hasMessageContaining("cartao");
+        }
+
+        @Test
+        @DisplayName("requestChange pago->free sempre agenda para fim do ciclo")
+        void requestPaidToFree_shouldScheduleToEndOfCycle() {
+            when(subscriptionRepository.findById(1000L)).thenReturn(Optional.of(subscription));
+            when(planRepository.findById(500L)).thenReturn(Optional.of(freePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(1000L)).thenReturn(Optional.empty());
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(planChangeRepository.save(any())).thenAnswer(inv -> {
+                SubscriptionPlanChange pc = inv.getArgument(0);
+                if (pc.getId() == null) pc.setId(9L);
+                return pc;
+            });
+            when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
+
+            RequestPlanChangeRequest request = new RequestPlanChangeRequest(
+                    500L, null, "admin", null, null, null, null, null);
+
+            service.requestChange(1000L, request);
+
+            // Subscription nao deve ter sido alterada ainda
+            assertThat(subscription.getPlan()).isEqualTo(currentPlan);
+            assertThat(subscription.getAsaasId()).isNull(); // fica como estava
+            verify(asaasGateway, never()).cancelSubscription(anyLong(), anyString());
+            verify(outboxPublisher).publish(eq("PlanChangeScheduledEvent"), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("processScheduledChanges pago->free cancela subscription no Asaas e zera asaasId")
+        void processScheduled_paidToFree_shouldCancelAsaas() {
+            subscription.setAsaasId("sub_asaas_old");
+
+            SubscriptionPlanChange planChange = SubscriptionPlanChange.builder()
+                    .id(11L)
+                    .company(company)
+                    .status(PlanChangeStatus.SCHEDULED)
+                    .subscription(subscription)
+                    .previousPlan(currentPlan)
+                    .requestedPlan(freePlan)
+                    .changeType(PlanChangeType.DOWNGRADE)
+                    .policy(br.com.holding.payments.planchange.PlanChangePolicy.END_OF_CYCLE)
+                    .scheduledFor(LocalDateTime.now().minusDays(1))
+                    .deltaAmount(new BigDecimal("-100.00"))
+                    .build();
+
+            when(planChangeRepository.findScheduledReadyToProcess(any())).thenReturn(List.of(planChange));
+            when(planChangeRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
+
+            service.processScheduledChanges();
+
+            verify(asaasGateway).cancelSubscription(1L, "sub_asaas_old");
+            assertThat(subscription.getAsaasId()).isNull();
+            assertThat(subscription.getPlan()).isEqualTo(freePlan);
+            assertThat(subscription.getEffectivePrice()).isEqualByComparingTo(BigDecimal.ZERO);
+            assertThat(planChange.getStatus()).isEqualTo(PlanChangeStatus.EFFECTIVE);
+            verify(outboxPublisher).publish(eq("PlanChangedEvent"), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("processScheduledChanges pago->pago nao chama cancelSubscription")
+        void processScheduled_paidToPaid_shouldNotCancelAsaas() {
+            subscription.setAsaasId("sub_asaas_existing");
+
+            SubscriptionPlanChange planChange = SubscriptionPlanChange.builder()
+                    .id(1L)
+                    .company(company)
+                    .status(PlanChangeStatus.SCHEDULED)
+                    .subscription(subscription)
+                    .previousPlan(currentPlan)
+                    .requestedPlan(upgradePlan)
+                    .changeType(PlanChangeType.UPGRADE)
+                    .policy(br.com.holding.payments.planchange.PlanChangePolicy.END_OF_CYCLE)
+                    .scheduledFor(LocalDateTime.now().minusDays(1))
+                    .deltaAmount(new BigDecimal("100.00"))
+                    .build();
+
+            when(planChangeRepository.findScheduledReadyToProcess(any())).thenReturn(List.of(planChange));
+            when(planChangeRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
+
+            service.processScheduledChanges();
+
+            verify(asaasGateway, never()).cancelSubscription(anyLong(), anyString());
+            assertThat(subscription.getAsaasId()).isEqualTo("sub_asaas_existing");
+            assertThat(subscription.getPlan()).isEqualTo(upgradePlan);
+        }
+
+        @Test
+        @DisplayName("Historico completo: pago->free->pago via sequencia de plan changes")
+        void historyCycle_paidToFreeToPaid_shouldRecordAllChanges() {
+            // Fase 1: pago -> free (agendado)
+            subscription.setAsaasId("sub_asaas_v1");
+            when(subscriptionRepository.findById(1000L)).thenReturn(Optional.of(subscription));
+            when(planRepository.findById(500L)).thenReturn(Optional.of(freePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(1000L)).thenReturn(Optional.empty());
+            when(companyRepository.getReferenceById(1L)).thenReturn(company);
+            when(planChangeRepository.save(any())).thenAnswer(inv -> {
+                SubscriptionPlanChange pc = inv.getArgument(0);
+                if (pc.getId() == null) pc.setId(100L);
+                return pc;
+            });
+            when(planChangeMapper.toResponse(any())).thenAnswer(inv -> dummyResponse(inv.getArgument(0)));
+
+            RequestPlanChangeRequest downgradeReq = new RequestPlanChangeRequest(
+                    500L, null, "admin", null, null, null, null, null);
+            service.requestChange(1000L, downgradeReq);
+
+            // Fase 2: executa agendamento (cancela Asaas, aplica free)
+            SubscriptionPlanChange downgrade = SubscriptionPlanChange.builder()
+                    .id(100L)
+                    .company(company)
+                    .status(PlanChangeStatus.SCHEDULED)
+                    .subscription(subscription)
+                    .previousPlan(currentPlan)
+                    .requestedPlan(freePlan)
+                    .changeType(PlanChangeType.DOWNGRADE)
+                    .policy(br.com.holding.payments.planchange.PlanChangePolicy.END_OF_CYCLE)
+                    .scheduledFor(LocalDateTime.now().minusDays(1))
+                    .deltaAmount(new BigDecimal("-100.00"))
+                    .build();
+            when(planChangeRepository.findScheduledReadyToProcess(any())).thenReturn(List.of(downgrade));
+            service.processScheduledChanges();
+
+            assertThat(subscription.getAsaasId()).isNull();
+            assertThat(subscription.getPlan()).isEqualTo(freePlan);
+            verify(asaasGateway).cancelSubscription(1L, "sub_asaas_v1");
+
+            // processScheduledChanges limpa o TenantContext ao final; restauramos
+            TenantContext.setCompanyId(1L);
+
+            // Fase 3: free -> pago (promove com PIX)
+            when(planRepository.findById(200L)).thenReturn(Optional.of(upgradePlan));
+            when(planChangeRepository.findPendingBySubscriptionId(1000L)).thenReturn(Optional.empty());
+            when(asaasGateway.createSubscription(eq(1L), any())).thenReturn(
+                    new br.com.holding.payments.integration.asaas.gateway.AsaasSubscriptionResult(
+                            "sub_asaas_v2", "cus_free123", "PIX",
+                            new BigDecimal("200.00"), LocalDate.now().plusDays(1).toString(),
+                            "MONTHLY", "ACTIVE"));
+
+            RequestPlanChangeRequest upgradeReq = new RequestPlanChangeRequest(
+                    200L, null, "admin", BillingType.PIX, null, null, null, null);
+            service.requestChange(1000L, upgradeReq);
+
+            assertThat(subscription.getAsaasId()).isEqualTo("sub_asaas_v2");
+            assertThat(subscription.getPlan()).isEqualTo(upgradePlan);
+            assertThat(subscription.getEffectivePrice()).isEqualByComparingTo(new BigDecimal("200.00"));
+
+            // Deve haver 2 plan changes salvos (downgrade + upgrade)
+            verify(planChangeRepository, atLeast(2)).save(any());
         }
     }
 }
