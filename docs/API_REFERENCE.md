@@ -62,6 +62,7 @@ POSTs que criam recursos monetários (`/charges`, `/subscriptions`, `/plan-chang
 - [Cupons (CouponController)](#cupons-couponcontroller)
 - [Validação de Cupom (CouponValidationController)](#validacao-de-cupom-couponvalidationcontroller)
 - [Webhooks Asaas (WebhookController)](#webhookcontroller)
+- [Eventos Webhook por Empresa (WebhookEventController)](#webhookeventcontroller)
 - [Admin de Webhooks (WebhookAdminController)](#webhookadmincontroller)
 - [Outbox Admin (OutboxAdminController)](#outboxadmincontroller)
 - [Reconciliação (ReconciliationController)](#reconciliationcontroller)
@@ -1050,21 +1051,52 @@ Controller responsável por upgrades, downgrades e sidegrades de assinatura. Uti
    - `newPlanId` (Long, **obrigatório**, `@NotNull`)
    - `currentUsage` (Map<String,Integer>, opcional) — uso atual por métrica (ex.: `{"users": 12}`) para downgrade validar limites do novo plano
    - `requestedBy` (String, opcional) — identificação de auditoria (e-mail do operador)
+   - `billingType` (BillingType, opcional) — `BOLETO`, `PIX`, `CREDIT_CARD` ou `UNDEFINED`. **Usado apenas na promoção de assinatura gratuita para paga.** Em trocas entre planos pagos é ignorado (Asaas reaproveita o billing method já configurado).
+   - `creditCard` (objeto, opcional) — dados do cartão para promoção de gratuito → pago com `billingType=CREDIT_CARD`. Mesma estrutura de `CreateSubscriptionRequest.CreditCardData` (`holderName`, `number`, `expiryMonth`, `expiryYear`, `ccv`).
+   - `creditCardHolderInfo` (objeto, opcional) — dados do titular para tokenização (`name`, `email`, `cpfCnpj`, `postalCode`, `addressNumber`, `phone`).
+   - `creditCardToken` (String, opcional) — token Asaas pré-gerado, alternativa a enviar `creditCard` + `creditCardHolderInfo`.
+   - `remoteIp` (String, opcional) — IP do solicitante para anti-fraude do Asaas.
 5. **Regras de negócio:**
    - Valida que o novo plano aceita o `currentUsage` (não pode fazer downgrade se uso > limite do plano destino).
    - Aplica política da `Company`:
      - **IMMEDIATE_PRORATA**: troca imediata; se `delta > 0` cria cobrança `PLAN_CHANGE`; se `delta < 0` cria entrada em `credit_ledger`.
      - **END_OF_CYCLE**: persiste `PlanChange` com `status=SCHEDULED` e `scheduledFor=nextCycleStart`. Executado por `ScheduledPlanChangeJob` (cron diário 01:00).
      - **IMMEDIATE_NO_PRORATA**: troca imediata sem ajuste financeiro.
+   - **Promoção de plano gratuito → pago:** quando a assinatura atual está em plano gratuito (preço 0) e o novo plano é pago, o sistema cria a subscription real no Asaas usando os campos `billingType` + `creditCard|creditCardToken` informados. Pular esses campos resulta em 400/422.
    - Atualiza subscription no Asaas (novo valor).
    - Publica `PlanChangedEvent` no outbox.
    - Registra em `credit_ledger` todos os movimentos.
-6. **JSON exemplo:**
+6. **JSON exemplo (troca entre planos pagos):**
 ```json
 {
   "newPlanId": 42,
   "currentUsage": { "users": 8, "storageGb": 15 },
   "requestedBy": "admin@acme.com"
+}
+```
+
+**JSON exemplo (promoção de gratuito → pago com cartão):**
+```json
+{
+  "newPlanId": 42,
+  "requestedBy": "admin@acme.com",
+  "billingType": "CREDIT_CARD",
+  "creditCard": {
+    "holderName": "MARIA SILVA",
+    "number": "4111111111111111",
+    "expiryMonth": "12",
+    "expiryYear": "2030",
+    "ccv": "123"
+  },
+  "creditCardHolderInfo": {
+    "name": "Maria Silva",
+    "email": "maria@acme.com",
+    "cpfCnpj": "12345678909",
+    "postalCode": "01310100",
+    "addressNumber": "1500",
+    "phone": "11988887777"
+  },
+  "remoteIp": "200.150.10.5"
 }
 ```
 7. **Response — `PlanChangeResponse`:** `id`, `subscriptionId`, `previousPlanId`, `previousPlanName`, `requestedPlanId`, `requestedPlanName`, `changeType`, `policy`, `deltaAmount`, `prorationCredit`, `prorationCharge`, `status` (PlanChangeStatus), `chargeId` (nullable), `creditLedgerId` (nullable), `scheduledFor` (nullable), `effectiveAt` (nullable), `requestedBy`, `requestedAt`, `failureReason` (nullable).
@@ -3085,6 +3117,213 @@ PromoPricing:
 
 ---
 
+### GET /api/v1/plans/{id}/limits
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/plans/{id}/limits
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Autorização: Qualquer usuário autenticado
+- Path Variable: `id` (Long, obrigatório)
+- Header X-Company-Id: Requerido
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+
+**Regras de Negócio**
+- Retorna a lista estruturada de limites do plano em formato runtime (deserializado do JSONB).
+- Cada item contém `key` (slug imutavel usado pelo sistema), `label` (texto exibivel), `type` (NUMBER, BOOLEAN ou UNLIMITED), `value` (preenchido quando NUMBER) e `enabled` (preenchido quando BOOLEAN).
+- O plano deve pertencer ao tenant; caso contrário retorna 404.
+
+**DTO de Response - List<PlanLimitDto>**
+
+| Campo | Tipo | Obrigatório | Descrição |
+|-------|------|-------------|-----------|
+| `key` | String | sim | Slug em snake_case (`^[a-z][a-z0-9_]*$`). Ex: `funcionarios`, `relatorios_avancados` |
+| `label` | String | sim | Texto exibivel ao usuário |
+| `type` | Enum | sim | `NUMBER`, `BOOLEAN` ou `UNLIMITED` |
+| `value` | Long | quando NUMBER | Quantidade permitida (>= 0) |
+| `enabled` | Boolean | quando BOOLEAN | Indica se o recurso está ativo |
+
+**JSON de Response de Exemplo**
+```json
+[
+  {
+    "key": "funcionarios",
+    "label": "Funcionarios cadastrados",
+    "type": "NUMBER",
+    "value": 25
+  },
+  {
+    "key": "filiais",
+    "label": "Filiais ilimitadas",
+    "type": "UNLIMITED"
+  },
+  {
+    "key": "relatorios_avancados",
+    "label": "Relatorios avancados",
+    "type": "BOOLEAN",
+    "enabled": false
+  }
+]
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Lista (pode ser vazia se nenhum limite estiver configurado)
+- `401 Unauthorized`: JWT inválido ou ausente
+- `404 Not Found`: Plano não existe ou pertence a outro tenant
+
+**Observações/Edge Cases**
+- O endpoint usa `PlanLimitResolver` (cache transactional readOnly) — leituras frequentes são leves.
+- Limites com `type=NUMBER` e `value=null` são tratados como não definidos (retornam `allowed=false` em `check`).
+
+---
+
+### GET /api/v1/plans/{id}/limits/{key}
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/plans/{id}/limits/{key}?usage={intendedUsage}
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Autorização: Qualquer usuário autenticado
+- Path Variables: `id` (Long, obrigatório), `key` (String, obrigatório)
+- Header X-Company-Id: Requerido
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+
+**Query Parameters**
+- `usage` (Integer, opcional): uso pretendido após a operação. Permite ao caller perguntar "se eu adicionar mais 1 funcionario, ainda esta dentro do limite?".
+
+**Regras de Negócio**
+- Consulta um limite específico pela `key` em runtime.
+- Para `UNLIMITED`: sempre retorna `allowed=true`.
+- Para `BOOLEAN`: respeita `enabled` (true permite, false bloqueia). `usage` é ignorado.
+- Para `NUMBER`: se `usage` for informado, retorna `allowed = usage <= value`. Se `usage` for nulo, retorna `allowed = value > 0`.
+- Se a `key` não existir no plano, retorna `found=false` e `allowed=null` (com HTTP 200).
+- Endpoint não lança 404 quando a key não existe — usa `PlanLimitCheckResponse.notFound(key)`.
+
+**Exemplo de uso**
+```
+GET /api/v1/plans/12/limits/funcionarios?usage=26
+```
+
+**DTO de Response - PlanLimitCheckResponse**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `key` | String | Key consultada |
+| `label` | String | Texto exibivel (null se não encontrado) |
+| `type` | Enum | `NUMBER`, `BOOLEAN`, `UNLIMITED` (null se não encontrado) |
+| `value` | Long | Valor configurado (somente NUMBER) |
+| `enabled` | Boolean | Estado configurado (somente BOOLEAN) |
+| `unlimited` | boolean | true se `type=UNLIMITED` |
+| `found` | boolean | false se key não existir no plano |
+| `currentUsage` | Integer | Eco do `usage` enviado pelo caller |
+| `allowed` | Boolean | Resultado da decisão (null se key não existir) |
+
+**JSON de Response de Exemplo (limite excedido)**
+```json
+{
+  "key": "funcionarios",
+  "label": "Funcionarios cadastrados",
+  "type": "NUMBER",
+  "value": 25,
+  "unlimited": false,
+  "found": true,
+  "currentUsage": 26,
+  "allowed": false
+}
+```
+
+**JSON de Response de Exemplo (key inexistente)**
+```json
+{
+  "key": "feature_inexistente",
+  "unlimited": false,
+  "found": false
+}
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Resposta sempre 200 (mesmo quando key inexiste, retorna `found=false`)
+- `401 Unauthorized`: JWT inválido ou ausente
+- `404 Not Found`: Plano não existe ou pertence a outro tenant
+
+**Observações/Edge Cases**
+- Quando o plano não possui o campo `value` (NUMBER) preenchido, `allowed` retorna false.
+- `currentUsage` no response é o eco do parâmetro de entrada e pode ser nulo.
+- Útil para guard-clauses no frontend antes de submeter operações que estouram limite.
+
+---
+
+### GET /api/v1/plans/{id}/features
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/plans/{id}/features
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Autorização: Qualquer usuário autenticado
+- Path Variable: `id` (Long, obrigatório)
+- Header X-Company-Id: Requerido
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+
+**Regras de Negócio**
+- Idêntico ao `/limits`, mas retorna o campo `features` do plano.
+- Use `features` para itens de marketing/comparativo (ex: "Suporte 24/7", "Acesso à API").
+- Mesmo formato estruturado (`PlanLimitDto`): `key`, `label`, `type`, `value`, `enabled`.
+
+**DTO de Response**
+- `List<PlanLimitDto>` (vide GET `/api/v1/plans/{id}/limits`)
+
+**JSON de Response de Exemplo**
+```json
+[
+  {
+    "key": "suporte_24x7",
+    "label": "Suporte 24x7",
+    "type": "BOOLEAN",
+    "enabled": true
+  },
+  {
+    "key": "api_publica",
+    "label": "API publica disponivel",
+    "type": "BOOLEAN",
+    "enabled": true
+  },
+  {
+    "key": "integracoes",
+    "label": "Integracoes inclusas",
+    "type": "NUMBER",
+    "value": 5
+  }
+]
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Lista retornada
+- `401 Unauthorized`: JWT inválido ou ausente
+- `404 Not Found`: Plano não existe ou pertence a outro tenant
+
+**Observações/Edge Cases**
+- Os campos legados `features` (string JSON) e `limits` (string JSON) ainda aparecem em `PlanResponse` para retrocompatibilidade. Os endpoints `/limits` e `/features` já entregam a forma estruturada pronta para consumo em runtime.
+
+---
+
 ## SubscriptionController
 
 ### POST /api/v1/subscriptions
@@ -3788,10 +4027,6 @@ POST /api/v1/subscriptions/{id}/resume
 
 ---
 
----
-
-Perfeito! Agora tenho o suficiente para gerar a documentação. Vou compilar todos os dados:
-
 ## WebhookController
 
 ### POST /api/v1/webhooks/asaas
@@ -3943,6 +4178,256 @@ Content-Length: 0
 5. **Escalabilidade**:
    - Endpoint é rápido (insert + return 200) e não bloqueia em I/O externo
    - Processamento real ocorre em background job
+
+---
+
+## WebhookEventController
+
+Base path: `/api/v1/webhooks/events`
+
+Permite que administradores e operadores da empresa autenticada consultem o histórico de eventos webhook recebidos do Asaas. Todas as queries são automaticamente filtradas pela company via RLS (`X-Company-Id` obrigatório). Não exige roles administrativas globais — diferente do `WebhookAdminController` (que é cross-tenant para `HOLDING_ADMIN`/`SYSTEM`).
+
+**Roles aceitas (na classe):** `HOLDING_ADMIN`, `COMPANY_ADMIN`, `COMPANY_OPERATOR`.
+
+---
+
+### GET /api/v1/webhooks/events
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/webhooks/events?status={status}&eventType={eventType}&page={page}&size={size}&sort={sort}
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Roles: `HOLDING_ADMIN`, `COMPANY_ADMIN` ou `COMPANY_OPERATOR`
+- Header X-Company-Id: Requerido (RLS)
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+
+**Query Parameters**
+- `status` (WebhookEventStatus, opcional): `PENDING`, `PROCESSING`, `DEFERRED`, `PROCESSED`, `FAILED`, `DLQ`.
+- `eventType` (String, opcional): tipo do evento Asaas, ex: `PAYMENT_RECEIVED`, `SUBSCRIPTION_CANCELED`.
+- `page` (Integer, opcional, default 0).
+- `size` (Integer, opcional, default 20).
+- `sort` (String, opcional, default `receivedAt,desc`).
+
+**Regras de Negócio**
+- Lista paginada filtrada por tenant (RLS) e pelos filtros opcionais.
+- Ordenação default por `receivedAt` descendente (`@PageableDefault`).
+- Suporta combinação livre dos filtros (ambos opcionais).
+
+**DTO de Response - Page<WebhookEventResponse>**
+
+WebhookEventResponse inclui:
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `id` | Long | ID local do evento |
+| `companyId` | Long | Empresa dona do evento |
+| `asaasEventId` | String | ID único do evento no Asaas |
+| `eventType` | String | Tipo do evento (ex: `PAYMENT_RECEIVED`) |
+| `status` | Enum | Status atual do processamento |
+| `attemptCount` | Integer | Tentativas de processamento já efetuadas |
+| `nextAttemptAt` | LocalDateTime | Próxima tentativa agendada (null quando processado) |
+| `processedAt` | LocalDateTime | Quando finalizou o processamento |
+| `receivedAt` | LocalDateTime | Quando foi recebido |
+| `lastError` | String | Última mensagem de erro |
+| `processedResourceType` | String | Tipo do recurso afetado (ex: `Charge`, `Subscription`) |
+| `processedResourceId` | Long | ID local do recurso afetado |
+| `processedAsaasId` | String | ID Asaas do recurso afetado |
+| `processingSummary` | String | Resumo curto do que foi processado |
+| `processingDurationMs` | Long | Tempo gasto no processamento |
+
+**JSON de Response Exemplo**
+```json
+{
+  "content": [
+    {
+      "id": 4521,
+      "companyId": 7,
+      "asaasEventId": "evt_650f80da5cd46f001adc2e72",
+      "eventType": "PAYMENT_RECEIVED",
+      "status": "PROCESSED",
+      "attemptCount": 1,
+      "nextAttemptAt": null,
+      "processedAt": "2026-04-15T10:35:21",
+      "receivedAt": "2026-04-15T10:35:18",
+      "lastError": null,
+      "processedResourceType": "Charge",
+      "processedResourceId": 9810,
+      "processedAsaasId": "pay_3219854",
+      "processingSummary": "Charge 9810 marked RECEIVED",
+      "processingDurationMs": 312
+    }
+  ],
+  "totalElements": 153,
+  "totalPages": 8,
+  "size": 20,
+  "number": 0,
+  "first": true,
+  "last": false,
+  "numberOfElements": 1
+}
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Lista retornada
+- `400 Bad Request`: Status inválido (não é enum válido)
+- `401 Unauthorized`: JWT inválido ou ausente
+- `403 Forbidden`: Role não permitida
+
+---
+
+### GET /api/v1/webhooks/events/summary
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/webhooks/events/summary
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Roles: `HOLDING_ADMIN`, `COMPANY_ADMIN` ou `COMPANY_OPERATOR`
+- Header X-Company-Id: Requerido (RLS)
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+
+**Regras de Negócio**
+- Retorna a contagem de eventos webhook agrupados por status para a empresa autenticada.
+- Útil para painel de monitoramento operacional.
+
+**DTO de Response - WebhookSummaryResponse**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `pending` | long | Eventos aguardando primeira tentativa |
+| `processing` | long | Eventos em processamento ativo |
+| `deferred` | long | Eventos adiados (backoff agendado) |
+| `processed` | long | Eventos finalizados com sucesso |
+| `failed` | long | Eventos com falha temporária |
+| `dlq` | long | Eventos enviados para DLQ (necessitam intervenção) |
+| `total` | long | Soma total |
+
+**JSON de Response Exemplo**
+```json
+{
+  "pending": 3,
+  "processing": 1,
+  "deferred": 8,
+  "processed": 1820,
+  "failed": 4,
+  "dlq": 2,
+  "total": 1838
+}
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Resumo retornado
+- `401 Unauthorized`: JWT inválido ou ausente
+- `403 Forbidden`: Role não permitida
+
+---
+
+### GET /api/v1/webhooks/events/{id}
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/webhooks/events/{id}
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Roles: `HOLDING_ADMIN`, `COMPANY_ADMIN` ou `COMPANY_OPERATOR`
+- Path Variable: `id` (Long, obrigatório)
+- Header X-Company-Id: Requerido (RLS)
+
+**Regras de Negócio**
+- Retorna o detalhe completo de um evento webhook para a empresa autenticada.
+- Cross-tenant retorna 404 (filtro RLS aplicado).
+
+**DTO de Response - WebhookEventResponse** (vide `GET /api/v1/webhooks/events`)
+
+**JSON de Response Exemplo**
+```json
+{
+  "id": 4521,
+  "companyId": 7,
+  "asaasEventId": "evt_650f80da5cd46f001adc2e72",
+  "eventType": "PAYMENT_RECEIVED",
+  "status": "PROCESSED",
+  "attemptCount": 1,
+  "processedAt": "2026-04-15T10:35:21",
+  "receivedAt": "2026-04-15T10:35:18",
+  "processedResourceType": "Charge",
+  "processedResourceId": 9810,
+  "processedAsaasId": "pay_3219854",
+  "processingSummary": "Charge 9810 marked RECEIVED",
+  "processingDurationMs": 312
+}
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Evento retornado
+- `401 Unauthorized`: JWT inválido ou ausente
+- `403 Forbidden`: Role não permitida
+- `404 Not Found`: Evento não existe ou pertence a outra empresa
+
+---
+
+### GET /api/v1/webhooks/events/{id}/payload
+
+**Método HTTP e Path Completo**
+```
+GET /api/v1/webhooks/events/{id}/payload
+```
+
+**Autenticação/Autorização**
+- Autenticação: JWT Bearer Token obrigatória
+- Roles: `HOLDING_ADMIN`, `COMPANY_ADMIN` ou `COMPANY_OPERATOR`
+- Path Variable: `id` (Long, obrigatório)
+- Header X-Company-Id: Requerido (RLS)
+
+**Produces**: `application/json`
+
+**Regras de Negócio**
+- Retorna o **payload bruto** (string JSON) recebido originalmente do Asaas.
+- Útil para auditoria, debug e replay manual.
+- O conteúdo é uma string JSON válida (Content-Type `application/json`), não um objeto encapsulado.
+
+**Response**
+- Body: string JSON (payload original do Asaas)
+
+**JSON de Response Exemplo**
+```json
+{
+  "id": "evt_650f80da5cd46f001adc2e72",
+  "event": "PAYMENT_RECEIVED",
+  "dateCreated": "2026-04-15 10:35:18",
+  "payment": {
+    "id": "pay_3219854",
+    "customer": "cus_000005217912",
+    "subscription": "sub_30tnfa9j6c",
+    "value": 199.90,
+    "billingType": "CREDIT_CARD",
+    "status": "RECEIVED"
+  }
+}
+```
+
+**Códigos HTTP Possíveis**
+- `200 OK`: Payload retornado
+- `401 Unauthorized`: JWT inválido ou ausente
+- `403 Forbidden`: Role não permitida
+- `404 Not Found`: Evento não existe ou pertence a outra empresa
+
+**Observações/Edge Cases**
+- O payload é armazenado como recebido — pode conter campos adicionais que o sistema ignorou (`@JsonIgnoreProperties(ignoreUnknown = true)` na ingestão).
+- Se o evento estiver muito antigo e tiver passado pela rotina de housekeeping (compactação/expurgo), o body pode estar truncado ou vazio.
 
 ---
 
@@ -5725,27 +6210,185 @@ ImportResult:
 
 ---
 
+### DELETE /api/v1/import/wipe
+
+**Método HTTP e Path**
+```
+DELETE /api/v1/import/wipe
+```
+
+**Autenticação/Autorização**
+- **Roles Requeridas**: somente `COMPANY_ADMIN` (mais restritivo que o `/asaas`)
+- **Header X-Company-Id**: Obrigatório (RLS aplica-se à empresa autenticada)
+- **Atenção**: operação destrutiva, irrecuperável.
+
+**Headers Relevantes**
+- `Authorization: Bearer <jwt_token>` (obrigatório)
+- `X-Company-Id: <company_id>` (obrigatório)
+- `X-Confirm-Wipe: I-UNDERSTAND-THIS-DELETES-EVERYTHING` (**obrigatório** — string literal exata)
+
+**Regras de Negócio**
+1. **Confirmação obrigatória**: o header `X-Confirm-Wipe` precisa conter exatamente `I-UNDERSTAND-THIS-DELETES-EVERYTHING`. Qualquer outro valor (ou ausência) lança `BusinessException` (HTTP 400/422 conforme handler).
+2. **Restrição a SANDBOX**: o `OrgDataWipeService` só executa quando a empresa autenticada está configurada com ambiente Asaas SANDBOX. Em PRODUCTION o serviço aborta com erro de negócio para evitar perda de dados reais.
+3. **Escopo do wipe**: remove todos os registros transacionais da empresa — clientes, assinaturas, cobranças, parcelamentos, planos, eventos webhook, registros de outbox, credit ledger, mudanças de plano, cupons e respectivos usos. Não remove a empresa, usuários ou API keys.
+4. **Auditoria**: o serviço registra o total de itens removidos por tabela; o resultado vai no body da resposta.
+
+**Exemplo de Requisição**
+```http
+DELETE /api/v1/import/wipe HTTP/1.1
+Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+X-Company-Id: 5
+X-Confirm-Wipe: I-UNDERSTAND-THIS-DELETES-EVERYTHING
+```
+
+**DTO de Response - WipeResult**
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `companyId` | Long | Empresa cuja base foi limpa |
+| `totalDeleted` | int | Soma de linhas removidas em todas as tabelas |
+| `deletedByTable` | Map<String,Integer> | Quantidade removida agrupada por tabela |
+
+**JSON de Response Exemplo**
+```json
+{
+  "companyId": 5,
+  "totalDeleted": 1284,
+  "deletedByTable": {
+    "charges": 567,
+    "subscriptions": 89,
+    "customers": 142,
+    "plans": 8,
+    "coupons": 4,
+    "coupon_usages": 11,
+    "webhook_events": 320,
+    "outbox": 99,
+    "credit_ledger": 32,
+    "plan_changes": 12
+  }
+}
+```
+
+**Códigos HTTP Possíveis**
+| Código | Cenário |
+|--------|---------|
+| **200 OK** | Wipe concluído |
+| **400 Bad Request** | Header `X-Confirm-Wipe` ausente ou com valor incorreto / empresa em ambiente PRODUCTION |
+| **401 Unauthorized** | Token inválido |
+| **403 Forbidden** | Usuário não é `COMPANY_ADMIN` |
+| **422 Unprocessable Entity** | Regra de negócio violada (ex.: ambiente não é sandbox) |
+| **500 Internal Server Error** | Falha durante a remoção em cascata |
+
+**Observações/Edge Cases**
+- A operação é **idempotente**: chamadas subsequentes simplesmente retornam contagens zeradas (nada a remover).
+- A remoção é executada em uma única transação; se uma das tabelas falhar a operação é revertida.
+- Use somente em pipelines de QA/sandbox; nunca habilite em produção. O guard de ambiente Asaas é a última linha de defesa.
+
+---
+
 ## Resumo de Autenticação por Controller
 
 | Controller | Endpoint | Autenticação | Roles | X-Company-Id |
 |---|---|---|---|---|
+| AuthController | POST /api/v1/auth/login | Público | permitAll | Não |
+| AuthController | POST /api/v1/auth/refresh | Público | permitAll | Não |
+| AuthController | POST /api/v1/auth/users | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não |
+| AuthController | GET /api/v1/auth/users | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não |
+| ApiKeyController | POST /api/v1/api-keys | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| ApiKeyController | GET /api/v1/api-keys | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| ApiKeyController | DELETE /api/v1/api-keys/{id} | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| AccessPolicyController | GET /api/v1/access-policy | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| AccessPolicyController | PUT /api/v1/access-policy | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| CustomerAccessController | GET /api/v1/customers/{id}/access-status | JWT | autenticado | Sim |
+| CompanyController | GET /api/v1/companies/me | JWT | isAuthenticated | Sim |
+| CompanyController | POST /api/v1/companies | JWT | HOLDING_ADMIN | Não |
+| CompanyController | GET /api/v1/companies | JWT | HOLDING_ADMIN | Não |
+| CompanyController | GET /api/v1/companies/{id} | JWT | HOLDING_ADMIN | Não |
+| CompanyController | PUT /api/v1/companies/{id} | JWT | HOLDING_ADMIN | Não |
+| CompanyController | PUT /api/v1/companies/{id}/credentials | JWT | HOLDING_ADMIN | Não |
+| CompanyController | POST /api/v1/companies/{id}/test-connection | JWT | HOLDING_ADMIN | Não |
+| CustomerController | POST /api/v1/customers | JWT/API Key | autenticado | Sim |
+| CustomerController | GET /api/v1/customers | JWT/API Key | autenticado | Sim |
+| CustomerController | GET /api/v1/customers/{id} | JWT/API Key | autenticado | Sim |
+| CustomerController | PUT /api/v1/customers/{id} | JWT/API Key | autenticado | Sim |
+| CustomerController | DELETE /api/v1/customers/{id} | JWT/API Key | autenticado | Sim |
+| CustomerController | POST /api/v1/customers/{id}/restore | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim |
+| CustomerController | POST /api/v1/customers/{id}/sync | JWT/API Key | autenticado | Sim |
+| CustomerController | GET /api/v1/customers/{id}/credit-balance | JWT/API Key | autenticado | Sim |
+| PlanController | POST /api/v1/plans | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/{id} | JWT/API Key | autenticado | Sim |
+| PlanController | PUT /api/v1/plans/{id} | JWT/API Key | autenticado | Sim |
+| PlanController | PATCH /api/v1/plans/{id}/activate | JWT/API Key | autenticado | Sim |
+| PlanController | PATCH /api/v1/plans/{id}/deactivate | JWT/API Key | autenticado | Sim |
+| PlanController | DELETE /api/v1/plans/{id} | JWT/API Key | autenticado | Sim |
+| PlanController | POST /api/v1/plans/{id}/new-version | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/codigo/{codigo} | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/{id}/limits | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/{id}/limits/{key} | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/{id}/features | JWT/API Key | autenticado | Sim |
+| PlanController | GET /api/v1/plans/{id}/pricing | JWT/API Key | autenticado | Sim |
+| SubscriptionController | POST /api/v1/subscriptions | JWT/API Key | autenticado | Sim |
+| SubscriptionController | GET /api/v1/subscriptions | JWT/API Key | autenticado | Sim |
+| SubscriptionController | GET /api/v1/subscriptions/{id} | JWT/API Key | autenticado | Sim |
+| SubscriptionController | GET /api/v1/subscriptions/{id}/charges | JWT/API Key | autenticado | Sim |
+| SubscriptionController | PUT /api/v1/subscriptions/{id} | JWT/API Key | autenticado | Sim |
+| SubscriptionController | PATCH /api/v1/subscriptions/{id}/payment-method | JWT/API Key | autenticado | Sim |
+| SubscriptionController | DELETE /api/v1/subscriptions/{id} | JWT/API Key | autenticado | Sim |
+| SubscriptionController | POST /api/v1/subscriptions/{id}/pause | JWT/API Key | autenticado | Sim |
+| SubscriptionController | POST /api/v1/subscriptions/{id}/resume | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/pix | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/boleto | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/credit-card | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/credit-card/installments | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/boleto/installments | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/undefined | JWT/API Key | autenticado | Sim |
+| ChargeController | GET /api/v1/charges | JWT/API Key | autenticado | Sim |
+| ChargeController | GET /api/v1/charges/{id} | JWT/API Key | autenticado | Sim |
+| ChargeController | GET /api/v1/charges/{id}/pix-qrcode | JWT/API Key | autenticado | Sim |
+| ChargeController | GET /api/v1/charges/{id}/boleto-line | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/{id}/refund | JWT/API Key | autenticado | Sim |
+| ChargeController | DELETE /api/v1/charges/{id} | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/{id}/regenerate-boleto | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/{id}/received-in-cash | JWT/API Key | autenticado | Sim |
+| ChargeController | POST /api/v1/charges/{id}/resend-notification | JWT/API Key | autenticado | Sim |
+| PlanChangeController | POST /api/v1/subscriptions/{subscriptionId}/preview-change | JWT/API Key | autenticado | Sim |
+| PlanChangeController | POST /api/v1/subscriptions/{subscriptionId}/change-plan | JWT/API Key | autenticado | Sim |
+| PlanChangeController | GET /api/v1/subscriptions/{subscriptionId}/plan-changes | JWT/API Key | autenticado | Sim |
+| PlanChangeController | DELETE /api/v1/subscriptions/{subscriptionId}/plan-changes/{changeId} | JWT/API Key | autenticado | Sim |
+| CouponController | POST /api/v1/coupons | JWT/API Key | autenticado | Sim |
+| CouponController | GET /api/v1/coupons | JWT/API Key | autenticado | Sim |
+| CouponController | GET /api/v1/coupons/active | JWT/API Key | autenticado | Sim |
+| CouponController | GET /api/v1/coupons/{id} | JWT/API Key | autenticado | Sim |
+| CouponController | GET /api/v1/coupons/code/{code} | JWT/API Key | autenticado | Sim |
+| CouponController | PUT /api/v1/coupons/{id} | JWT/API Key | autenticado | Sim |
+| CouponController | DELETE /api/v1/coupons/{id} | JWT/API Key | autenticado | Sim |
+| CouponController | PATCH /api/v1/coupons/{id}/activate | JWT/API Key | autenticado | Sim |
+| CouponController | GET /api/v1/coupons/{id}/usages | JWT/API Key | autenticado | Sim |
+| CouponValidationController | POST /api/v1/coupons/validate/public | Público | permitAll | Sim |
+| CouponValidationController | POST /api/v1/coupons/validate | JWT/API Key | autenticado | Sim |
 | WebhookController | POST /api/v1/webhooks/asaas | Token de webhook | permitAll | Não (query param) |
+| WebhookEventController | GET /api/v1/webhooks/events | JWT | HOLDING_ADMIN, COMPANY_ADMIN, COMPANY_OPERATOR | Sim |
+| WebhookEventController | GET /api/v1/webhooks/events/summary | JWT | HOLDING_ADMIN, COMPANY_ADMIN, COMPANY_OPERATOR | Sim |
+| WebhookEventController | GET /api/v1/webhooks/events/{id} | JWT | HOLDING_ADMIN, COMPANY_ADMIN, COMPANY_OPERATOR | Sim |
+| WebhookEventController | GET /api/v1/webhooks/events/{id}/payload | JWT | HOLDING_ADMIN, COMPANY_ADMIN, COMPANY_OPERATOR | Sim |
 | WebhookAdminController | GET /api/v1/admin/webhooks | JWT | HOLDING_ADMIN, SYSTEM | Não |
 | WebhookAdminController | GET /api/v1/admin/webhooks/summary | JWT | HOLDING_ADMIN, SYSTEM | Não |
 | WebhookAdminController | POST /api/v1/admin/webhooks/{id}/replay | JWT | HOLDING_ADMIN, SYSTEM | Não |
-| OutboxAdminController | GET /api/v1/admin/outbox | JWT | HOLDING_ADMIN | Não |
-| OutboxAdminController | GET /api/v1/admin/outbox/summary | JWT | HOLDING_ADMIN | Não |
-| OutboxAdminController | POST /api/v1/admin/outbox/{id}/retry | JWT | HOLDING_ADMIN | Não |
-| ReconciliationController | POST /api/v1/admin/reconciliation/charges | JWT | HOLDING_ADMIN | Sim (obrigatório) |
-| ReconciliationController | POST /api/v1/admin/reconciliation/subscriptions | JWT | HOLDING_ADMIN | Sim (obrigatório) |
-| ReconciliationController | POST /api/v1/admin/reconciliation/dlq/replay | JWT | HOLDING_ADMIN | Não (cross-tenant) |
-| ReportController | GET /api/v1/reports/revenue | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportController | GET /api/v1/reports/subscriptions/mrr | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportController | GET /api/v1/reports/subscriptions/churn | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportController | GET /api/v1/reports/overdue | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportController | GET /api/v1/reports/dashboard | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportExportController | GET /api/v1/reports/export/revenue | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportExportController | GET /api/v1/reports/export/mrr | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportExportController | GET /api/v1/reports/export/churn | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
-| ReportExportController | GET /api/v1/reports/export/overdue | JWT | Presumível COMPANY_ADMIN+ | Sim (presumível) |
+| OutboxAdminController | GET /api/v1/admin/outbox | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não |
+| OutboxAdminController | GET /api/v1/admin/outbox/summary | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não |
+| OutboxAdminController | POST /api/v1/admin/outbox/{id}/retry | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não |
+| ReconciliationController | POST /api/v1/admin/reconciliation/charges | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim (obrigatório) |
+| ReconciliationController | POST /api/v1/admin/reconciliation/subscriptions | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim (obrigatório) |
+| ReconciliationController | POST /api/v1/admin/reconciliation/dlq/replay | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Não (cross-tenant) |
+| ReportController | GET /api/v1/reports/revenue | JWT/API Key | autenticado | Sim |
+| ReportController | GET /api/v1/reports/subscriptions/mrr | JWT/API Key | autenticado | Sim |
+| ReportController | GET /api/v1/reports/subscriptions/churn | JWT/API Key | autenticado | Sim |
+| ReportController | GET /api/v1/reports/overdue | JWT/API Key | autenticado | Sim |
+| ReportController | GET /api/v1/reports/dashboard | JWT/API Key | autenticado | Sim |
+| ReportExportController | GET /api/v1/reports/export/revenue | JWT/API Key | autenticado | Sim |
+| ReportExportController | GET /api/v1/reports/export/mrr | JWT/API Key | autenticado | Sim |
+| ReportExportController | GET /api/v1/reports/export/churn | JWT/API Key | autenticado | Sim |
+| ReportExportController | GET /api/v1/reports/export/overdue | JWT/API Key | autenticado | Sim |
 | DataImportController | POST /api/v1/import/asaas | JWT | HOLDING_ADMIN, COMPANY_ADMIN | Sim (obrigatório) |
+| DataImportController | DELETE /api/v1/import/wipe | JWT | COMPANY_ADMIN | Sim (obrigatório) + `X-Confirm-Wipe` |
