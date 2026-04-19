@@ -359,7 +359,7 @@ public class SubscriptionService {
 
     // ==================== PRIVATE ====================
 
-    private void syncSubscriptionCharges(Long companyId, Subscription subscription, Company company, Customer customer) {
+    public void syncSubscriptionCharges(Long companyId, Subscription subscription, Company company, Customer customer) {
         try {
             AsaasPageResponse<AsaasPaymentResponse> paymentsPage =
                     asaasGateway.listSubscriptionPayments(companyId, subscription.getAsaasId());

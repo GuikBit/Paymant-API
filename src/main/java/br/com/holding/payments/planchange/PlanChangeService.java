@@ -27,6 +27,7 @@ import br.com.holding.payments.planchange.dto.PlanChangeResponse;
 import br.com.holding.payments.planchange.dto.RequestPlanChangeRequest;
 import br.com.holding.payments.subscription.Subscription;
 import br.com.holding.payments.subscription.SubscriptionRepository;
+import br.com.holding.payments.subscription.SubscriptionService;
 import br.com.holding.payments.subscription.SubscriptionStatus;
 import br.com.holding.payments.subscription.dto.CreateSubscriptionRequest;
 import br.com.holding.payments.tenant.TenantContext;
@@ -59,6 +60,7 @@ public class PlanChangeService {
     private final PlanChangeMapper planChangeMapper;
     private final PlanService planService;
     private final AsaasGatewayService asaasGateway;
+    private final SubscriptionService subscriptionService;
 
     @Transactional(readOnly = true)
     public PlanChangePreviewResponse previewChange(Long subscriptionId, Long newPlanId) {
@@ -481,6 +483,11 @@ public class PlanChangeService {
         subscription.setNextDueDate(nextDueDate);
         subscription.setCurrentPeriodStart(nextDueDate.atStartOfDay());
         subscriptionRepository.save(subscription);
+
+        // Sincroniza a primeira cobranca que o Asaas gera automaticamente ao criar a subscription.
+        // Sem isso, o webhook PAYMENT_CREATED fica em retry loop por nao achar a Charge local.
+        subscriptionService.syncSubscriptionCharges(
+                companyId, subscription, subscription.getCompany(), customer);
 
         planChange.markEffective();
         planChangeRepository.save(planChange);
