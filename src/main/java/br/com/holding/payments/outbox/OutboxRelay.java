@@ -1,6 +1,7 @@
 package br.com.holding.payments.outbox;
 
 import br.com.holding.payments.tenant.CrossTenant;
+import br.com.holding.payments.webhooksubscription.WebhookDispatcher;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
@@ -18,16 +19,19 @@ import java.util.List;
 public class OutboxRelay {
 
     private final OutboxEventRepository outboxEventRepository;
+    private final WebhookDispatcher webhookDispatcher;
     private final RestClient restClient;
     private final int maxAttempts;
     private final Counter failedCounter;
     private final String webhookUrl;
 
     public OutboxRelay(OutboxEventRepository outboxEventRepository,
+                       WebhookDispatcher webhookDispatcher,
                        @Value("${app.outbox.max-attempts:5}") int maxAttempts,
                        @Value("${app.outbox.webhook-url:}") String webhookUrl,
                        MeterRegistry meterRegistry) {
         this.outboxEventRepository = outboxEventRepository;
+        this.webhookDispatcher = webhookDispatcher;
         this.maxAttempts = maxAttempts;
         this.webhookUrl = webhookUrl;
         this.restClient = RestClient.builder().build();
@@ -66,6 +70,16 @@ public class OutboxRelay {
                 log.debug("Published outbox event: id={}, type={}", event.getId(), event.getEventType());
             } catch (Exception e) {
                 handleFailure(event, e);
+            }
+
+            // Fan out para as webhook subscriptions do tenant (independente do global).
+            // Rodadas separadas: se o global falhou, as subscriptions ainda recebem;
+            // se elas falharem, cada uma tem seu proprio retry.
+            try {
+                webhookDispatcher.dispatch(event);
+            } catch (Exception dispatchError) {
+                log.error("Falha ao enfileirar webhook dispatch para event id={}: {}",
+                        event.getId(), dispatchError.getMessage(), dispatchError);
             }
         }
     }

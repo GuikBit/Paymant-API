@@ -112,3 +112,5 @@ app:
     enabled: true
     requests-per-window: 100
     window-ms: 60000
+  webhook-subscriptions:
+    relay-interval-ms: 5000
