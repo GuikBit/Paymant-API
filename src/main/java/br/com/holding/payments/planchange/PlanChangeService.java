@@ -111,6 +111,7 @@ public class PlanChangeService {
         LocalDate periodStart = subscription.getCurrentPeriodStart() != null
                 ? subscription.getCurrentPeriodStart().toLocalDate() : subscription.getCreatedAt().toLocalDate();
         LocalDate periodEnd = subscription.getNextDueDate() != null
+                && subscription.getNextDueDate().isAfter(periodStart)
                 ? subscription.getNextDueDate() : periodStart.plusMonths(1);
         LocalDate changeDate = LocalDate.now();
 
@@ -240,6 +241,7 @@ public class PlanChangeService {
         LocalDate periodStart = subscription.getCurrentPeriodStart() != null
                 ? subscription.getCurrentPeriodStart().toLocalDate() : subscription.getCreatedAt().toLocalDate();
         LocalDate periodEnd = subscription.getNextDueDate() != null
+                && subscription.getNextDueDate().isAfter(periodStart)
                 ? subscription.getNextDueDate() : periodStart.plusMonths(1);
         LocalDate changeDate = LocalDate.now();
         if (changeDate.isBefore(periodStart)) changeDate = periodStart;
