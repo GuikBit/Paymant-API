@@ -1,5 +1,6 @@
 package br.com.holding.payments.webhook;
 
+import br.com.holding.payments.webhook.dto.CancelWebhookEventRequest;
 import br.com.holding.payments.webhook.dto.WebhookEventResponse;
 import br.com.holding.payments.webhook.dto.WebhookSummaryResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,5 +53,17 @@ public class WebhookEventController {
             description = "Retorna o payload JSON bruto recebido do Asaas, util para debug e auditoria.")
     public ResponseEntity<String> payload(@PathVariable Long id) {
         return ResponseEntity.ok(webhookService.getPayload(id));
+    }
+
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "Cancelar evento webhook em retry",
+            description = "Interrompe o loop de retry de um evento parado em DEFERRED, PENDING ou FAILED, movendo-o para DLQ. " +
+                    "O evento mantem o historico e pode ser reprocessado depois via /admin/webhooks/{id}/replay. " +
+                    "O corpo da requisicao e opcional; se enviado, o campo 'reason' sera registrado em last_error.")
+    public ResponseEntity<WebhookEventResponse> cancel(
+            @PathVariable Long id,
+            @RequestBody(required = false) CancelWebhookEventRequest request) {
+        String reason = request != null ? request.reason() : null;
+        return ResponseEntity.ok(webhookService.cancel(id, reason));
     }
 }

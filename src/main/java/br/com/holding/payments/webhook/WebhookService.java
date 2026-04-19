@@ -109,6 +109,30 @@ public class WebhookService {
     }
 
     @Transactional
+    public WebhookEventResponse cancel(Long eventId, String reason) {
+        WebhookEvent event = webhookEventRepository.findById(eventId)
+                .orElseThrow(() -> new ResourceNotFoundException("WebhookEvent", eventId));
+
+        if (event.getStatus() != WebhookEventStatus.DEFERRED &&
+                event.getStatus() != WebhookEventStatus.PENDING &&
+                event.getStatus() != WebhookEventStatus.FAILED) {
+            throw new BusinessException(
+                    "Apenas eventos com status DEFERRED, PENDING ou FAILED podem ser cancelados. Status atual: "
+                            + event.getStatus());
+        }
+
+        String cancellationReason = reason != null && !reason.isBlank()
+                ? reason
+                : "Cancelado manualmente";
+        event.markDlq(cancellationReason);
+        webhookEventRepository.save(event);
+
+        log.info("Webhook event cancelled: id={}, asaasEventId={}, reason={}",
+                eventId, event.getAsaasEventId(), cancellationReason);
+        return toResponse(event);
+    }
+
+    @Transactional
     public WebhookEventResponse replay(Long eventId) {
         WebhookEvent event = webhookEventRepository.findById(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("WebhookEvent", eventId));
