@@ -7,6 +7,7 @@ import br.com.holding.payments.charge.ChargeMapper;
 import br.com.holding.payments.coupon.*;
 import br.com.holding.payments.integration.asaas.dto.AsaasPageResponse;
 import br.com.holding.payments.integration.asaas.dto.AsaasPaymentResponse;
+import br.com.holding.payments.integration.asaas.dto.AsaasPixQrCodeResponse;
 import br.com.holding.payments.common.errors.BusinessException;
 import br.com.holding.payments.common.errors.ResourceNotFoundException;
 import br.com.holding.payments.company.Company;
@@ -220,11 +221,31 @@ public class SubscriptionService {
         return subscriptionMapper.toResponse(getSubscriptionOrThrow(id));
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public Page<ChargeResponse> listCharges(Long subscriptionId, Pageable pageable) {
         getSubscriptionOrThrow(subscriptionId); // validate existence
         return chargeRepository.findBySubscriptionId(subscriptionId, pageable)
-                .map(chargeMapper::toResponse);
+                .map(this::ensurePixDataAndMap);
+    }
+
+    private ChargeResponse ensurePixDataAndMap(Charge charge) {
+        if (charge.getBillingType() == BillingType.PIX
+                && charge.getAsaasId() != null
+                && (charge.getPixCopyPaste() == null || charge.getPixQrcode() == null)) {
+            try {
+                Long companyId = charge.getCompany().getId();
+                AsaasPixQrCodeResponse qr = asaasGateway.getPixQrCode(companyId, charge.getAsaasId());
+                if (qr.payload() != null) {
+                    charge.setPixCopyPaste(qr.payload());
+                    charge.setPixQrcode(qr.encodedImage());
+                    chargeRepository.save(charge);
+                }
+            } catch (Exception e) {
+                log.warn("Falha ao obter QR Code PIX no Asaas para cobranca id={}, asaasId={}: {}",
+                        charge.getId(), charge.getAsaasId(), e.getMessage());
+            }
+        }
+        return chargeMapper.toResponse(charge);
     }
 
     @Transactional
