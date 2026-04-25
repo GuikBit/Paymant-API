@@ -294,6 +294,20 @@ public class ChargeService {
                     appliedOriginalValue, couponResult);
         }
 
+        if (billingType == BillingType.PIX && charge.getAsaasId() != null) {
+            try {
+                AsaasPixQrCodeResponse qr = asaasGateway.getPixQrCode(companyId, charge.getAsaasId());
+                if (qr.payload() != null) {
+                    charge.setPixCopyPaste(qr.payload());
+                    charge.setPixQrcode(qr.encodedImage());
+                    charge = chargeRepository.save(charge);
+                }
+            } catch (Exception e) {
+                log.warn("Falha ao obter QR Code PIX no Asaas apos criar cobranca id={}, asaasId={}: {}",
+                        charge.getId(), charge.getAsaasId(), e.getMessage());
+            }
+        }
+
         outboxPublisher.publish("ChargeCreatedEvent", "Charge",
                 charge.getId().toString(), chargeMapper.toResponse(charge));
 
