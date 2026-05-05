@@ -1,5 +1,6 @@
 package br.com.holding.payments.planchange;
 
+import br.com.holding.payments.asaassync.AsaasSyncService;
 import br.com.holding.payments.audit.Auditable;
 import br.com.holding.payments.charge.*;
 import br.com.holding.payments.charge.dto.ChargeResponse;
@@ -61,6 +62,7 @@ public class PlanChangeService {
     private final PlanService planService;
     private final AsaasGatewayService asaasGateway;
     private final SubscriptionService subscriptionService;
+    private final AsaasSyncService asaasSyncService;
 
     @Transactional(readOnly = true)
     public PlanChangePreviewResponse previewChange(Long subscriptionId, Long newPlanId) {
@@ -325,6 +327,9 @@ public class PlanChangeService {
         subscription.setPlan(newPlan);
         subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
         subscriptionRepository.save(subscription);
+        asaasSyncService.enqueueSubscriptionValueUpdate(
+                subscription, subscription.getEffectivePrice(),
+                "plan_change_" + planChange.getId());
 
         planChange.markEffective();
         planChangeRepository.save(planChange);
@@ -394,6 +399,14 @@ public class PlanChangeService {
                 subscription.setPlan(newPlan);
                 subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
                 subscriptionRepository.save(subscription);
+
+                // Enfileira atualizacao do valor recorrente no Asaas. Pulado para
+                // paid->free, pois o asaasId acabou de ser nulado.
+                if (subscription.getAsaasId() != null) {
+                    asaasSyncService.enqueueSubscriptionValueUpdate(
+                            subscription, subscription.getEffectivePrice(),
+                            "plan_change_" + planChange.getId());
+                }
 
                 planChange.markEffective();
                 planChangeRepository.save(planChange);
@@ -525,6 +538,9 @@ public class PlanChangeService {
                 subscription.setPlan(newPlan);
                 subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
                 subscriptionRepository.save(subscription);
+                asaasSyncService.enqueueSubscriptionValueUpdate(
+                        subscription, subscription.getEffectivePrice(),
+                        "plan_change_" + planChange.getId());
                 planChange.markEffective();
             } else {
                 // PIX/Boleto: wait for payment
@@ -547,12 +563,18 @@ public class PlanChangeService {
             subscription.setPlan(newPlan);
             subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
             subscriptionRepository.save(subscription);
+            asaasSyncService.enqueueSubscriptionValueUpdate(
+                    subscription, subscription.getEffectivePrice(),
+                    "plan_change_" + planChange.getId());
             planChange.markEffective();
         } else {
             // Sidegrade: just swap plans
             subscription.setPlan(newPlan);
             subscription.setEffectivePrice(planService.getEffectivePrice(newPlan, subscription.getCycle()));
             subscriptionRepository.save(subscription);
+            asaasSyncService.enqueueSubscriptionValueUpdate(
+                    subscription, subscription.getEffectivePrice(),
+                    "plan_change_" + planChange.getId());
             planChange.markEffective();
         }
 

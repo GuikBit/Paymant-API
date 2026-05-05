@@ -66,6 +66,8 @@ class PlanChangeServiceTest {
     @Mock private PlanChangeMapper planChangeMapper;
     @Mock private PlanService planService;
     @Mock private br.com.holding.payments.integration.asaas.gateway.AsaasGatewayService asaasGateway;
+    @Mock private br.com.holding.payments.subscription.SubscriptionService subscriptionService;
+    @Mock private br.com.holding.payments.asaassync.AsaasSyncService asaasSyncService;
 
     @InjectMocks
     private PlanChangeService service;

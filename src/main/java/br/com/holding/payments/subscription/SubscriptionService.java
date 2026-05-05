@@ -148,7 +148,8 @@ public class SubscriptionService {
             );
         }
 
-        LocalDate nextDueDate = request.nextDueDate() != null ? request.nextDueDate() : LocalDate.now().plusDays(1);
+        int trialOffset = plan.getTrialDays() != null && plan.getTrialDays() > 0 ? plan.getTrialDays() : 1;
+        LocalDate nextDueDate = request.nextDueDate() != null ? request.nextDueDate() : LocalDate.now().plusDays(trialOffset);
 
         String asaasSubscriptionId = null;
         if (!isFreePlan) {
